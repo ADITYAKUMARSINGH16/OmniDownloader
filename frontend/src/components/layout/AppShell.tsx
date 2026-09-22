@@ -3,13 +3,14 @@
 import { useState } from "react"
 import Link from "next/link"
 import { usePathname } from "next/navigation"
-import { Download, History, Globe, Settings, Info, Menu, X, Zap } from "lucide-react"
+import { Download, History, Globe, Settings, Info, Menu, X, Zap, Layers } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
+import { BrowserExtensionModal } from "@/components/layout/BrowserExtensionModal"
 
 const navigation = [
   { name: "Dashboard", href: "/", icon: Download },
-  { name: "Queue", href: "/queue", icon: Download },
+  { name: "Queue", href: "/queue", icon: Layers },
   { name: "History", href: "/history", icon: History },
   { name: "Supported Sites", href: "/sites", icon: Globe },
   { name: "Settings", href: "/settings", icon: Settings },
@@ -36,42 +37,48 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           </Link>
 
           {/* Desktop Nav */}
-          <nav className="hidden md:flex items-center gap-1">
-            {navigation.map((item) => {
-              const isActive = pathname === item.href || (item.href !== "/" && pathname.startsWith(item.href))
-              const Icon = item.icon
-              return (
-                <Link
-                  key={item.name}
-                  href={item.href}
-                  className={cn(
-                    "relative flex items-center gap-2 px-3.5 py-2 rounded-lg text-sm font-medium transition-all duration-200",
-                    isActive
-                      ? "text-primary-foreground"
-                      : "text-muted-foreground hover:text-foreground hover:bg-accent/60"
-                  )}
-                >
-                  {isActive && (
-                    <span className="absolute inset-0 rounded-lg gradient-primary opacity-90" />
-                  )}
-                  <span className="relative flex items-center gap-2">
-                    <Icon className="h-4 w-4" />
-                    {item.name}
-                  </span>
-                </Link>
-              )
-            })}
-          </nav>
+          <div className="hidden md:flex items-center gap-3">
+            <nav className="flex items-center gap-1">
+              {navigation.map((item) => {
+                const isActive = pathname === item.href || (item.href !== "/" && pathname.startsWith(item.href))
+                const Icon = item.icon
+                return (
+                  <Link
+                    key={item.name}
+                    href={item.href}
+                    className={cn(
+                      "relative flex items-center gap-2 px-3.5 py-2 rounded-lg text-sm font-medium transition-all duration-200",
+                      isActive
+                        ? "text-primary-foreground"
+                        : "text-muted-foreground hover:text-foreground hover:bg-accent/60"
+                    )}
+                  >
+                    {isActive && (
+                      <span className="absolute inset-0 rounded-lg gradient-primary opacity-90" />
+                    )}
+                    <span className="relative flex items-center gap-2">
+                      <Icon className="h-4 w-4" />
+                      {item.name}
+                    </span>
+                  </Link>
+                )
+              })}
+            </nav>
+
+            <BrowserExtensionModal />
+          </div>
 
           {/* Mobile Menu Toggle */}
-          <Button
-            variant="ghost"
-            size="icon"
-            className="md:hidden"
-            onClick={() => setMobileOpen(!mobileOpen)}
-          >
-            {mobileOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
-          </Button>
+          <div className="flex md:hidden items-center gap-2">
+            <BrowserExtensionModal />
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={() => setMobileOpen(!mobileOpen)}
+            >
+              {mobileOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
+            </Button>
+          </div>
         </div>
 
         {/* Mobile Nav Drawer */}

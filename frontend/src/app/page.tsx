@@ -1,6 +1,6 @@
 "use client"
 
-import { Download, CheckCircle, TrendingUp, Youtube, Twitter, Instagram, Facebook, HardDrive, Link2, ChevronRight, Zap, ArrowDownToLine } from "lucide-react"
+import { Download, CheckCircle, TrendingUp, Youtube, Twitter, Instagram, Facebook, HardDrive, Link2, ChevronRight, Zap, ArrowDownToLine, Puzzle } from "lucide-react"
 import { Reddit } from "@/components/icons"
 import Link from "next/link"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
@@ -9,6 +9,7 @@ import { DownloadQueue } from "@/components/download/DownloadQueue"
 import { cn, formatBytes } from "@/lib/utils"
 import { useDownloadStore } from "@/hooks/useStore"
 import { AppShell } from "@/components/layout/AppShell"
+import { BrowserExtensionModal } from "@/components/layout/BrowserExtensionModal"
 
 const sites = [
   { name: "YouTube", icon: Youtube, color: "text-red-400" },
@@ -94,6 +95,33 @@ export default function DashboardPage() {
 
           {/* Sidebar */}
           <div className="space-y-6">
+            {/* Browser Extension Promo Card */}
+            <Card className="border-border/40 bg-card/60 shadow-sm overflow-hidden relative group">
+              <div className="absolute top-0 right-0 w-24 h-24 rounded-full opacity-10 blur-xl bg-gradient-to-br from-primary to-violet-500" />
+              <CardHeader className="pb-2">
+                <div className="flex items-center gap-2.5">
+                  <div className="h-8 w-8 rounded-lg gradient-primary flex items-center justify-center text-white shadow-sm">
+                    <Puzzle className="h-4 w-4" />
+                  </div>
+                  <div>
+                    <CardTitle className="text-base font-heading">Browser Extension</CardTitle>
+                    <p className="text-xs text-muted-foreground">Chrome, Brave, Edge & Opera</p>
+                  </div>
+                </div>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                <p className="text-xs text-muted-foreground leading-relaxed">
+                  Capture media on YouTube, Twitter, Instagram, or Reddit with 1-click right-click menus.
+                </p>
+                <BrowserExtensionModal>
+                  <button className="w-full flex items-center justify-center gap-2 py-2 px-3 rounded-lg gradient-primary text-white text-xs font-semibold shadow-sm hover:shadow-md hover:brightness-105 transition-all">
+                    <Puzzle className="h-3.5 w-3.5" />
+                    <span>Get Browser Extension</span>
+                  </button>
+                </BrowserExtensionModal>
+              </CardContent>
+            </Card>
+
             <Card className="border-border/40 bg-card/60 shadow-sm overflow-hidden">
               <CardHeader className="pb-3">
                 <CardTitle className="text-lg font-heading">Supported Sites</CardTitle>
