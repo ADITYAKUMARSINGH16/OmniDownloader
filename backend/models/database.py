@@ -12,11 +12,13 @@ Base = declarative_base()
 
 class DownloadStatus(str, enum.Enum):
     QUEUED = "queued"
+    SCHEDULED = "scheduled"
     DOWNLOADING = "downloading"
     PAUSED = "paused"
     COMPLETED = "completed"
     FAILED = "failed"
     CANCELLED = "cancelled"
+
 
 
 class ContentType(str, enum.Enum):
@@ -59,6 +61,8 @@ class Download(Base):
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
     started_at = Column(DateTime(timezone=True))
     completed_at = Column(DateTime(timezone=True))
+    scheduled_at = Column(DateTime(timezone=True))
+
     
     __table_args__ = (
         Index("idx_downloads_status", "status"),

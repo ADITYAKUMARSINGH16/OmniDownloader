@@ -1,6 +1,6 @@
 export type ContentType = "video" | "audio" | "image" | "document" | "archive" | "unknown"
 
-export type DownloadStatus = "queued" | "downloading" | "paused" | "completed" | "failed" | "cancelled"
+export type DownloadStatus = "queued" | "downloading" | "paused" | "completed" | "failed" | "cancelled" | "scheduled"
 
 export interface Format {
   format_id: string
@@ -62,6 +62,7 @@ export interface DownloadInfo {
   updated_at?: string
   started_at?: string
   completed_at?: string
+  scheduled_at?: string
 }
 
 export interface DownloadRequest {
@@ -76,6 +77,11 @@ export interface DownloadRequest {
   file_size?: number
   is_video?: boolean
   is_audio?: boolean
+  audio_only?: boolean
+  audio_format?: string
+  audio_bitrate?: string
+  speed_limit_kbps?: number
+  scheduled_at?: string
 }
 
 export interface DownloadResponse {
@@ -99,6 +105,7 @@ export interface QueueStatus {
   queued_count: number
   completed_count: number
   failed_count: number
+  scheduled_count?: number
   max_concurrent: number
 }
 
@@ -133,6 +140,15 @@ export interface Settings {
   auto_merge_audio_video: boolean
   delete_temp_files: boolean
   theme: "light" | "dark" | "system"
+  api_key?: string
+  require_api_key?: boolean
+  rate_limit_per_minute?: number
+}
+
+export interface ApiKeyResponse {
+  api_key: string
+  created_at: string
+  message: string
 }
 
 export type SettingsUpdate = Partial<Settings>
@@ -140,4 +156,69 @@ export type SettingsUpdate = Partial<Settings>
 export interface Extractor {
   name: string
   domains: string[]
+}
+
+export interface BatchDownloadRequest {
+  urls: string[]
+  format_id?: string
+  priority?: number
+  is_video?: boolean
+  is_audio?: boolean
+  audio_only?: boolean
+  audio_format?: string
+  audio_bitrate?: string
+  speed_limit_kbps?: number
+  scheduled_at?: string
+}
+
+export interface BatchDownloadResult {
+  url: string
+  id?: string
+  status: "queued" | "failed" | "scheduled"
+  title?: string
+  error?: string
+}
+
+export interface BatchDownloadResponse {
+  total: number
+  queued: number
+  failed: number
+  results: BatchDownloadResult[]
+}
+
+export interface CookieStatus {
+  exists: boolean
+  size: number
+  line_count: number
+  updated_at?: string
+}
+
+export interface SourceStat {
+  source: string
+  count: number
+  percentage: number
+}
+
+export interface FormatStat {
+  format: string
+  count: number
+}
+
+export interface DailyActivity {
+  date: string
+  count: number
+  bytes: number
+}
+
+export interface AnalyticsStats {
+  total_downloads: number
+  completed_downloads: number
+  failed_downloads: number
+  active_downloads: number
+  scheduled_downloads: number
+  total_bytes: number
+  success_rate: number
+  sources: SourceStat[]
+  formats: FormatStat[]
+  daily_activity: DailyActivity[]
 }

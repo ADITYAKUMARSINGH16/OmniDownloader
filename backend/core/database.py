@@ -32,6 +32,15 @@ AsyncSessionLocal = async_sessionmaker(
 async def init_db():
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+        if "sqlite" in settings.database_url:
+            from sqlalchemy import text
+            try:
+                res = await conn.execute(text("PRAGMA table_info(downloads)"))
+                columns = [row[1] for row in res.fetchall()]
+                if "scheduled_at" not in columns:
+                    await conn.execute(text("ALTER TABLE downloads ADD COLUMN scheduled_at DATETIME"))
+            except Exception:
+                pass
 
 
 async def close_db():

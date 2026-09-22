@@ -183,7 +183,7 @@ class RedditExtractor(BaseExtractor):
                 except Exception as ext_err:
                     logger.warning(f"Failed external video extraction: {ext_err}")
 
-            # Non-video post: animated GIF, image, or preview variant
+            # Non-video post: animated GIF, image, or gallery
             formats: List[FormatModel] = []
             preview_image = None
 
@@ -219,55 +219,84 @@ class RedditExtractor(BaseExtractor):
                         )
                     )
 
-            # 2. Original file (GIF, PNG, JPG, WebP)
-            if post_url:
-                parsed_path = urllib.parse.urlparse(post_url).path
-                ext = parsed_path.split(".")[-1].lower() if "." in parsed_path else "bin"
-                if ext not in ["gif", "png", "jpg", "jpeg", "webp", "mp4"]:
-                    ext = "gif" if "gif" in post_url.lower() else "jpg"
-
-                size = await self._get_remote_size(post_url)
-                is_gif = ext == "gif"
-                quality_label = "Original Animated GIF" if is_gif else f"Original Image ({ext.upper()})"
-
-                formats.append(
-                    FormatModel(
-                        format_id=post_url,
-                        quality=quality_label,
-                        extension=ext,
-                        filesize=size,
-                        is_video=is_gif,
-                        is_audio=False,
-                        protocol="https",
-                    )
-                )
-
-            # 3. Handle galleries (multiple images)
-            if post.get("media_metadata"):
+            # 2. Handle galleries (multiple images)
+            is_gallery = bool(post.get("is_gallery") or post.get("media_metadata"))
+            if is_gallery and post.get("media_metadata"):
                 meta = post["media_metadata"]
-                for item_id, item_data in meta.items():
-                    if item_data.get("status") == "valid" and item_data.get("s"):
-                        s = item_data["s"]
-                        img_url = html.unescape(s.get("u", ""))
-                        if img_url:
-                            size = await self._get_remote_size(img_url)
-                            w = s.get("x")
-                            h = s.get("y")
-                            formats.append(
-                                FormatModel(
-                                    format_id=img_url,
-                                    quality=f"Gallery Image ({w}x{h})" if w and h else "Gallery Image",
-                                    extension="jpg",
-                                    filesize=size,
-                                    width=w,
-                                    height=h,
-                                    is_video=False,
-                                    is_audio=False,
-                                    protocol="https",
-                                )
-                            )
+                # Respect Reddit gallery order if gallery_data is present
+                ordered_ids = []
+                if post.get("gallery_data") and isinstance(post["gallery_data"].get("items"), list):
+                    ordered_ids = [item.get("media_id") for item in post["gallery_data"]["items"] if item.get("media_id") in meta]
+                if not ordered_ids:
+                    ordered_ids = list(meta.keys())
 
-            thumbnail = preview_image or post.get("thumbnail")
+                gallery_idx = 1
+                for item_id in ordered_ids:
+                    item_data = meta.get(item_id, {})
+                    if item_data.get("status") == "valid":
+                        mime = str(item_data.get("m", "image/jpg")).lower()
+                        img_ext = "png" if "png" in mime else ("gif" if "gif" in mime else "jpg")
+                        direct_img_url = f"https://i.redd.it/{item_id}.{img_ext}"
+
+                        s = item_data.get("s", {})
+                        w = s.get("x")
+                        h = s.get("y")
+                        size = await self._get_remote_size(direct_img_url)
+                        if not size and s.get("u"):
+                            direct_img_url = html.unescape(s["u"])
+                            size = await self._get_remote_size(direct_img_url)
+
+                        res_tag = f" ({w}x{h})" if w and h else ""
+                        formats.append(
+                            FormatModel(
+                                format_id=direct_img_url,
+                                quality=f"Image {gallery_idx}{res_tag} - {img_ext.upper()}",
+                                extension=img_ext,
+                                filesize=size,
+                                width=w,
+                                height=h,
+                                is_video=False,
+                                is_audio=False,
+                                protocol="https",
+                            )
+                        )
+                        if not preview_image:
+                            preview_image = direct_img_url
+                        gallery_idx += 1
+
+            # 3. Direct single image / GIF file
+            elif post_url and not is_gallery:
+                parsed_path = urllib.parse.urlparse(post_url).path.lower()
+                is_direct_image = (
+                    "i.redd.it" in post_url.lower()
+                    or "i.imgur.com" in post_url.lower()
+                    or any(parsed_path.endswith(e) for e in [".jpg", ".jpeg", ".png", ".gif", ".webp"])
+                )
+                if is_direct_image:
+                    ext = parsed_path.split(".")[-1].lower() if "." in parsed_path else "jpg"
+                    if ext not in ["gif", "png", "jpg", "jpeg", "webp"]:
+                        ext = "jpg"
+
+                    size = await self._get_remote_size(post_url)
+                    is_gif = ext == "gif"
+                    quality_label = "Original Animated GIF" if is_gif else f"Original Image ({ext.upper()})"
+
+                    formats.append(
+                        FormatModel(
+                            format_id=post_url,
+                            quality=quality_label,
+                            extension=ext,
+                            filesize=size,
+                            is_video=is_gif,
+                            is_audio=False,
+                            protocol="https",
+                        )
+                    )
+                    if not preview_image:
+                        preview_image = post_url
+
+            raw_thumb = post.get("thumbnail")
+            thumbnail = preview_image or (html.unescape(raw_thumb) if raw_thumb else None)
             if thumbnail and not thumbnail.startswith("http"):
                 thumbnail = None
 

@@ -4,7 +4,7 @@ import asyncio
 import socket
 from urllib.parse import urlparse
 from typing import Optional
-from fastapi import HTTPException, status
+from fastapi import HTTPException, status, Request
 
 from core.config import settings
 
@@ -149,3 +149,74 @@ def sanitize_folder_path(path_str: str) -> str:
         
     cleaned = os.path.expanduser(os.path.expandvars(cleaned))
     return os.path.abspath(cleaned)
+
+
+def extract_api_key(request: Request) -> Optional[str]:
+    """Extract API key from X-API-Key header, Bearer Authorization, or query param."""
+    key = request.headers.get("X-API-Key") or request.headers.get("x-api-key")
+    if key:
+        return key.strip()
+
+    auth_header = request.headers.get("Authorization", "")
+    if auth_header.startswith("Bearer "):
+        token = auth_header[7:].strip()
+        if token:
+            return token
+
+    param_key = request.query_params.get("api_key")
+    if param_key:
+        return param_key.strip()
+
+    return None
+
+
+async def verify_api_key(request: Request) -> Optional[str]:
+    """
+    Verify incoming API key against configured key in database or environment.
+    If 'require_api_key' is enabled, raises 401 on missing or 403 on invalid key.
+    """
+    from core.database import AsyncSessionLocal
+    from models.database import Settings as DBSettings
+    from sqlalchemy import select
+    import json
+    import os
+
+    provided_key = extract_api_key(request)
+
+    configured_key = os.getenv("OMNI_API_KEY")
+    require_key = False
+
+    try:
+        async with AsyncSessionLocal() as session:
+            res = await session.execute(
+                select(DBSettings).where(DBSettings.key.in_(["api_key", "require_api_key"]))
+            )
+            rows = res.scalars().all()
+            for r in rows:
+                if r.key == "api_key" and r.value:
+                    try:
+                        configured_key = json.loads(r.value)
+                    except Exception:
+                        configured_key = r.value
+                elif r.key == "require_api_key" and r.value:
+                    try:
+                        require_key = bool(json.loads(r.value))
+                    except Exception:
+                        require_key = False
+    except Exception:
+        pass
+
+    if require_key:
+        if not provided_key:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="API Key required. Pass header 'X-API-Key: <key>' or 'Authorization: Bearer <key>'.",
+                headers={"WWW-Authenticate": "ApiKey"},
+            )
+        if configured_key and provided_key != configured_key:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Invalid API Key provided.",
+            )
+
+    return provided_key

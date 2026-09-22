@@ -1,9 +1,13 @@
-const API_BASE = 'http://localhost:8000/api'
+const DEFAULT_API_BASE = 'http://127.0.0.1:8000/api'
 const STORAGE_KEY = 'omnidownload_config'
 
 async function getConfig() {
-  const result = await chrome.storage.sync.get(STORAGE_KEY)
-  return result[STORAGE_KEY] || { apiUrl: API_BASE }
+  const result = await chrome.storage.sync.get([STORAGE_KEY, 'omni_api_key'])
+  const config = result[STORAGE_KEY] || { apiUrl: DEFAULT_API_BASE }
+  if (result.omni_api_key && !config.apiKey) {
+    config.apiKey = result.omni_api_key
+  }
+  return config
 }
 
 async function setConfig(config) {
@@ -11,22 +15,24 @@ async function setConfig(config) {
 }
 
 chrome.runtime.onInstalled.addListener(() => {
-  chrome.contextMenus.create({
-    id: 'omnidownload-link',
-    title: 'Download with OmniDownload',
-    contexts: ['link'],
-  })
-  
-  chrome.contextMenus.create({
-    id: 'omnidownload-page',
-    title: 'Download this Page with OmniDownload',
-    contexts: ['page'],
-  })
-  
-  chrome.contextMenus.create({
-    id: 'omnidownload-selection',
-    title: 'Download Selected URL with OmniDownload',
-    contexts: ['selection'],
+  chrome.contextMenus.removeAll(() => {
+    chrome.contextMenus.create({
+      id: 'omnidownload-link',
+      title: 'Download with OmniDownload',
+      contexts: ['link'],
+    })
+    
+    chrome.contextMenus.create({
+      id: 'omnidownload-page',
+      title: 'Download this Page with OmniDownload',
+      contexts: ['page'],
+    })
+    
+    chrome.contextMenus.create({
+      id: 'omnidownload-selection',
+      title: 'Download Selected URL with OmniDownload',
+      contexts: ['selection'],
+    })
   })
 })
 
@@ -40,50 +46,59 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
     return
   }
   
+  const headers = { 'Content-Type': 'application/json' }
+  if (config.apiKey) {
+    headers['X-API-Key'] = config.apiKey
+  }
+
   try {
     const response = await fetch(`${config.apiUrl}/analyze`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers,
       body: JSON.stringify({ url })
     })
     
     const data = await response.json()
     
-    if (data.error) {
-      showNotification(tab.id, 'Error', data.error.message)
+    if (!response.ok || data.error) {
+      showNotification(tab.id, 'Error', data.error?.message || data.detail?.error?.message || 'Failed to analyze URL')
       return
     }
     
     const downloadResponse = await fetch(`${config.apiUrl}/download`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers,
       body: JSON.stringify({ 
         url, 
-        format_id: data.formats[0]?.format_id 
+        format_id: data.formats?.[0]?.format_id,
+        title: data.title,
+        thumbnail: data.thumbnail,
+        duration: data.duration,
       })
     })
     
     const downloadData = await downloadResponse.json()
     
-    if (downloadData.error) {
-      showNotification(tab.id, 'Error', downloadData.error.message)
+    if (!downloadResponse.ok || downloadData.error) {
+      showNotification(tab.id, 'Error', downloadData.error?.message || 'Failed to queue download')
       return
     }
     
-    showNotification(tab.id, 'Success', `Download started: ${data.title}`)
+    showNotification(tab.id, 'OmniDownload', `✓ Queued download: ${data.title || 'Media'}`)
     
     chrome.runtime.sendMessage({ 
       type: 'DOWNLOAD_STARTED', 
       downloadId: downloadData.id,
       title: data.title
-    })
+    }).catch(() => {})
   } catch (error) {
     console.error('OmniDownload error:', error)
-    showNotification(tab.id, 'Error', 'Failed to connect to OmniDownload')
+    showNotification(tab.id, 'OmniDownload', 'Failed to connect to OmniDownload backend')
   }
 })
 
 function showNotification(tabId, title, message) {
+  if (!tabId) return
   chrome.scripting.executeScript({
     target: { tabId },
     func: (title, message) => {
@@ -93,23 +108,24 @@ function showNotification(tabId, title, message) {
         top: 20px;
         right: 20px;
         z-index: 2147483647;
-        background: white;
-        border: 1px solid #ddd;
+        background: #1e1b4b;
+        color: white;
+        border: 1px solid #4338ca;
         border-radius: 8px;
-        padding: 16px 20px;
-        box-shadow: 0 4px 12px rgba(0,0,0,0.15);
-        max-width: 300px;
+        padding: 12px 16px;
+        box-shadow: 0 4px 16px rgba(0,0,0,0.3);
+        max-width: 320px;
         font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
       `
       notification.innerHTML = `
-        <div style="font-weight: 600; margin-bottom: 4px;">${title}</div>
-        <div style="color: #666; font-size: 14px;">${message}</div>
+        <div style="font-weight: 600; font-size: 13px; margin-bottom: 4px;">${title}</div>
+        <div style="color: #c7d2fe; font-size: 12px;">${message}</div>
       `
       document.body.appendChild(notification)
-      setTimeout(() => notification.remove(), 5000)
+      setTimeout(() => notification.remove(), 4000)
     },
     args: [title, message]
-  })
+  }).catch(() => {})
 }
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
@@ -121,47 +137,5 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.type === 'SET_CONFIG') {
     setConfig(message.config).then(() => sendResponse({ success: true }))
     return true
-  }
-})
-
-chrome.action.onClicked.addListener(async (tab) => {
-  const config = await getConfig()
-  
-  if (tab.url && (tab.url.startsWith('http://') || tab.url.startsWith('https://'))) {
-    try {
-      const response = await fetch(`${config.apiUrl}/analyze`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ url: tab.url })
-      })
-      
-      const data = await response.json()
-      
-      if (data.error) {
-        showNotification(tab.id, 'Error', data.error.message)
-        return
-      }
-      
-      const downloadResponse = await fetch(`${config.apiUrl}/download`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ 
-          url: tab.url, 
-          format_id: data.formats[0]?.format_id 
-        })
-      })
-      
-      const downloadData = await downloadResponse.json()
-      
-      if (downloadData.error) {
-        showNotification(tab.id, 'Error', downloadData.error.message)
-        return
-      }
-      
-      showNotification(tab.id, 'Success', `Download started: ${data.title}`)
-    } catch (error) {
-      console.error('OmniDownload error:', error)
-      showNotification(tab.id, 'Error', 'Failed to connect to OmniDownload')
-    }
   }
 })

@@ -1,8 +1,11 @@
 from fastapi import FastAPI, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
+from slowapi.errors import RateLimitExceeded
+from slowapi import _rate_limit_exceeded_handler
 
 from core.config import settings
+from core.limiter import limiter
 from core.database import init_db, close_db
 from api.routes import router as api_router
 from api.websocket import manager, websocket_endpoint
@@ -50,20 +53,68 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logging.getLogger("main").error(f"Error creating temp_dir: {e}")
 
+    # Start background scheduler for delayed/scheduled downloads
+    import asyncio
+    scheduler_task = asyncio.create_task(queue_manager.start_scheduler())
+
+
     yield
+    scheduler_task.cancel()
     await close_db()
 
 
 
+
+openapi_tags = [
+    {
+        "name": "Analysis",
+        "description": "Analyze multimedia URLs, query metadata, format streams, and audio/video tracks.",
+    },
+    {
+        "name": "Downloads",
+        "description": "Create, monitor, pause, resume, retry, cancel, and schedule downloads.",
+    },
+    {
+        "name": "Queue",
+        "description": "Inspect and control download execution queue, status, and active job counters.",
+    },
+    {
+        "name": "History",
+        "description": "Historical download records with full search, sorting, CSV/JSON export, and import.",
+    },
+    {
+        "name": "Analytics",
+        "description": "Aggregated bandwidth, platform distribution, success metrics, and daily trends.",
+    },
+    {
+        "name": "Settings",
+        "description": "Application configuration, storage directories, speed limits, and authentication cookies.",
+    },
+    {
+        "name": "Extractors",
+        "description": "List all active extractor engines and supported content providers.",
+    },
+    {
+        "name": "System",
+        "description": "Operating system desktop integration, file reveal, and directory exploration.",
+    },
+]
+
 app = FastAPI(
     title=settings.app_name,
     version=settings.app_version,
+    description="Universal media download engine supporting 1000+ sources with real-time websocket progress, scheduling, format transcoding, and analytics.",
+    openapi_tags=openapi_tags,
     lifespan=lifespan,
 )
+
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origins,
+    allow_origin_regex=r"^(http://localhost(:\d+)?|http://127\.0\.0\.1(:\d+)?|chrome-extension://.*|moz-extension://.*)$",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

@@ -11,6 +11,7 @@ export default function QueuePage() {
   const { queue } = useDownloadStore()
 
   const activeCount = queue.filter((d) => ["downloading", "queued"].includes(d.status)).length
+  const scheduledCount = queue.filter((d) => d.status === "scheduled").length
   const completedCount = queue.filter((d) => d.status === "completed").length
   const totalBytes = queue.reduce((acc, d) => acc + (d.downloaded_size || d.file_size || 0), 0)
 
@@ -24,10 +25,10 @@ export default function QueuePage() {
               <span className="p-2 rounded-xl gradient-primary shadow-sm text-white inline-flex">
                 <ArrowDownToLine className="h-6 w-6" />
               </span>
-              Download Queue
+              Downloads
             </h1>
             <p className="text-sm text-muted-foreground mt-1">
-              Real-time monitoring and control of active, pending, and completed downloads
+              Real-time monitoring, queue management, and download history
             </p>
           </div>
 
@@ -37,6 +38,12 @@ export default function QueuePage() {
               <Zap className="h-3.5 w-3.5" />
               <span>{activeCount} Active</span>
             </div>
+            {scheduledCount > 0 && (
+              <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-purple-500/10 border border-purple-500/20 text-xs font-medium text-purple-400">
+                <Clock className="h-3.5 w-3.5" />
+                <span>{scheduledCount} Scheduled</span>
+              </div>
+            )}
             <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-xs font-medium text-emerald-400">
               <CheckCircle className="h-3.5 w-3.5" />
               <span>{completedCount} Completed</span>

@@ -3,15 +3,15 @@
 import { useState } from "react"
 import Link from "next/link"
 import { usePathname } from "next/navigation"
-import { Download, History, Globe, Settings, Info, Menu, X, Zap, Layers } from "lucide-react"
+import { Download, History, Globe, Settings, Info, Menu, X, Zap, Layers, BarChart3 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 import { BrowserExtensionModal } from "@/components/layout/BrowserExtensionModal"
 
 const navigation = [
-  { name: "Dashboard", href: "/", icon: Download },
-  { name: "Queue", href: "/queue", icon: Layers },
-  { name: "History", href: "/history", icon: History },
+  { name: "Downloader", href: "/", icon: Download },
+  { name: "Downloads", href: "/queue", icon: Layers },
+  { name: "Analytics", href: "/dashboard", icon: BarChart3 },
   { name: "Supported Sites", href: "/sites", icon: Globe },
   { name: "Settings", href: "/settings", icon: Settings },
   { name: "About", href: "/about", icon: Info },

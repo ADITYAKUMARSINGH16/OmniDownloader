@@ -17,8 +17,12 @@ import {
   Calendar,
   HardDrive,
   FileVideo,
-  AlertCircle
+  AlertCircle,
+  FileDown,
+  FileUp,
+  Loader2,
 } from "lucide-react"
+
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
@@ -258,6 +262,60 @@ export default function HistoryPage() {
     }
   }
 
+  const [isExporting, setIsExporting] = useState(false)
+  const [isImporting, setIsImporting] = useState(false)
+
+  const handleExport = async (format: "json" | "csv") => {
+    setIsExporting(true)
+    try {
+      const blob = await api.exportHistory(format)
+      const url = window.URL.createObjectURL(blob)
+      const a = document.createElement("a")
+      a.href = url
+      a.download = `omnidownload_history.${format}`
+      document.body.appendChild(a)
+      a.click()
+      a.remove()
+      window.URL.revokeObjectURL(url)
+      toast({
+        title: "Export Complete",
+        description: `Exported history as omnidownload_history.${format}`,
+      })
+    } catch (e: any) {
+      toast({
+        title: "Export Failed",
+        description: e.message || "Failed to export history",
+        variant: "destructive",
+      })
+    } finally {
+      setIsExporting(false)
+    }
+  }
+
+  const handleImportFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+
+    setIsImporting(true)
+    try {
+      const res = await api.importHistory(file)
+      toast({
+        title: "Import Complete",
+        description: `Successfully imported ${res.imported_count} record(s)`,
+      })
+      await loadHistory()
+    } catch (e: any) {
+      toast({
+        title: "Import Failed",
+        description: e.response?.data?.detail || e.message || "Failed to import history",
+        variant: "destructive",
+      })
+    } finally {
+      setIsImporting(false)
+      e.target.value = ""
+    }
+  }
+
   const completedCount = history.filter((h) => h.status === "completed").length
   const failedCount = history.filter((h) => h.status === "failed").length
   const totalBytes = history.reduce((acc, h) => acc + (h.file_size || 0), 0)
@@ -279,7 +337,7 @@ export default function HistoryPage() {
             </p>
           </div>
 
-          <div className="flex items-center gap-3 flex-wrap">
+          <div className="flex items-center gap-2 flex-wrap">
             {/* Quick Stat Badges */}
             <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-xs font-medium text-emerald-400">
               <CheckCircle className="h-3.5 w-3.5" />
@@ -298,18 +356,65 @@ export default function HistoryPage() {
               </div>
             )}
 
+            {/* Export Dropdown */}
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={history.length === 0 || isExporting}
+                  className="gap-1.5 text-xs border-border/40"
+                >
+                  {isExporting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <FileDown className="h-3.5 w-3.5" />}
+                  Export
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                <DropdownMenuItem onClick={() => handleExport("csv")}>
+                  Export as CSV (.csv)
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => handleExport("json")}>
+                  Export as JSON (.json)
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+
+            {/* Import Button */}
+            <label className="cursor-pointer">
+              <input
+                type="file"
+                accept=".json,.csv"
+                onChange={handleImportFile}
+                disabled={isImporting}
+                className="hidden"
+              />
+              <Button
+                variant="outline"
+                size="sm"
+                asChild
+                disabled={isImporting}
+                className="gap-1.5 text-xs border-border/40"
+              >
+                <span>
+                  {isImporting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <FileUp className="h-3.5 w-3.5" />}
+                  Import
+                </span>
+              </Button>
+            </label>
+
             <Button
               variant="destructive"
               size="sm"
               onClick={handleClearHistory}
               disabled={history.length === 0}
-              className="gap-1.5 text-xs ml-auto sm:ml-2"
+              className="gap-1.5 text-xs ml-auto sm:ml-1"
             >
               <Trash2 className="h-3.5 w-3.5" />
-              Clear History
+              Clear
             </Button>
           </div>
         </div>
+
 
         {/* Filter and Search Bar */}
         <div className="flex flex-col sm:flex-row items-center gap-3">

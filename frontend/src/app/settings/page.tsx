@@ -15,7 +15,16 @@ import {
   ShieldAlert,
   Folder,
   Loader2,
-  Check
+  Check,
+  Gauge,
+  Key,
+  Upload,
+  FileText,
+  Copy,
+  Eye,
+  EyeOff,
+  RefreshCw,
+  Lock,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
@@ -24,7 +33,7 @@ import { Label } from "@/components/ui/label"
 import { Switch } from "@/components/ui/switch"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs"
-import { Settings as SettingsType, SettingsUpdate } from "@/types"
+import { Settings as SettingsType, SettingsUpdate, CookieStatus } from "@/types"
 import { api } from "@/services/api"
 import { cn } from "@/lib/utils"
 import { toast } from "@/hooks/useToast"
@@ -36,16 +45,30 @@ export default function SettingsPage() {
   const [isLoading, setIsLoading] = useState(true)
   const [isSaving, setIsSaving] = useState(false)
   const [isOpeningFolder, setIsOpeningFolder] = useState(false)
+  const [cookieStatus, setCookieStatus] = useState<CookieStatus | null>(null)
+  const [isUploadingCookies, setIsUploadingCookies] = useState(false)
+  const [cookieText, setCookieText] = useState("")
+  const [showCookiePaste, setShowCookiePaste] = useState(false)
+  const [isGeneratingKey, setIsGeneratingKey] = useState(false)
+  const [showApiKey, setShowApiKey] = useState(false)
+  const [isCopied, setIsCopied] = useState(false)
   const { theme, setTheme } = useTheme()
 
   useEffect(() => {
     const loadSettings = async () => {
       try {
-        const data = await api.getSettings()
+        const [data, cookies] = await Promise.all([
+          api.getSettings(),
+          api.getCookiesStatus().catch(() => null),
+        ])
         if (data.download_dir) {
           data.download_dir = data.download_dir.replace(/^["']+|["']+$/g, "").trim()
         }
+        if (data.api_key && typeof window !== "undefined") {
+          localStorage.setItem("omni_api_key", data.api_key)
+        }
         setSettings(data)
+        if (cookies) setCookieStatus(cookies)
       } catch (e) {
         console.error("Failed to load settings:", e)
       } finally {
@@ -66,6 +89,7 @@ export default function SettingsPage() {
       const update: SettingsUpdate = {
         download_dir: cleanDir,
         max_concurrent_downloads: settings.max_concurrent_downloads,
+        max_download_speed: settings.max_download_speed,
         retry_count: settings.retry_count,
         preferred_video_format: settings.preferred_video_format,
         preferred_audio_format: settings.preferred_audio_format,
@@ -73,9 +97,15 @@ export default function SettingsPage() {
         auto_merge_audio_video: settings.auto_merge_audio_video,
         delete_temp_files: settings.delete_temp_files,
         theme: settings.theme,
+        api_key: settings.api_key,
+        require_api_key: settings.require_api_key,
+        rate_limit_per_minute: settings.rate_limit_per_minute,
       }
       const saved = await api.updateSettings(update)
       setSettings(saved)
+      if (saved.api_key && typeof window !== "undefined") {
+        localStorage.setItem("omni_api_key", saved.api_key)
+      }
       toast({
         title: "Settings Saved",
         description: "Your preferences have been successfully updated.",
@@ -90,6 +120,62 @@ export default function SettingsPage() {
     } finally {
       setIsSaving(false)
     }
+  }
+
+  const handleGenerateKey = async () => {
+    setIsGeneratingKey(true)
+    try {
+      const res = await api.generateApiKey()
+      if (settings) {
+        setSettings({ ...settings, api_key: res.api_key })
+      }
+      if (typeof window !== "undefined") {
+        localStorage.setItem("omni_api_key", res.api_key)
+      }
+      toast({
+        title: "API Key Generated",
+        description: "New token generated and stored for API requests.",
+      })
+    } catch (err: any) {
+      toast({
+        title: "Generation Failed",
+        description: err.message || "Failed to generate API key",
+        variant: "destructive",
+      })
+    } finally {
+      setIsGeneratingKey(false)
+    }
+  }
+
+  const handleDeleteKey = async () => {
+    if (!confirm("Revoke this API Key? External applications using it will lose access.")) return
+    try {
+      await api.deleteApiKey()
+      if (settings) {
+        setSettings({ ...settings, api_key: undefined, require_api_key: false })
+      }
+      if (typeof window !== "undefined") {
+        localStorage.removeItem("omni_api_key")
+      }
+      toast({
+        title: "API Key Revoked",
+        description: "API Key removed and requirement disabled.",
+      })
+    } catch (err: any) {
+      toast({
+        title: "Revocation Failed",
+        description: err.message || "Failed to revoke API key",
+        variant: "destructive",
+      })
+    }
+  }
+
+  const handleCopyKey = () => {
+    if (!settings?.api_key) return
+    navigator.clipboard.writeText(settings.api_key)
+    setIsCopied(true)
+    toast({ title: "Copied", description: "API token copied to clipboard." })
+    setTimeout(() => setIsCopied(false), 2000)
   }
 
   const handleOpenFolder = async () => {
@@ -316,6 +402,62 @@ export default function SettingsPage() {
 
             <Card className="border-border/40 bg-card/60 shadow-sm backdrop-blur">
               <CardHeader>
+                <CardTitle className="text-lg font-heading flex items-center gap-2">
+                  <Gauge className="h-5 w-5 text-primary" />
+                  Bandwidth Limiter (Speed Throttle)
+                </CardTitle>
+                <CardDescription>Limit maximum download speed to avoid saturating your connection</CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
+                  {[
+                    { label: "Unlimited", value: null },
+                    { label: "1 MB/s", value: 1024 },
+                    { label: "2.5 MB/s", value: 2560 },
+                    { label: "5 MB/s", value: 5120 },
+                    { label: "10 MB/s", value: 10240 },
+                  ].map((preset) => {
+                    const isSelected = (settings?.max_download_speed ?? null) === preset.value
+                    return (
+                      <button
+                        key={preset.label}
+                        type="button"
+                        onClick={() => handleSettingChange("max_download_speed", preset.value)}
+                        className={cn(
+                          "px-3 py-2 rounded-lg text-xs font-semibold border transition-all duration-200",
+                          isSelected
+                            ? "border-primary bg-primary/10 text-primary shadow-sm"
+                            : "border-border/40 bg-background/30 text-muted-foreground hover:bg-background/60"
+                        )}
+                      >
+                        {preset.label}
+                      </button>
+                    )
+                  })}
+                </div>
+                <div className="space-y-1.5 pt-2">
+                  <Label htmlFor="custom_speed">Custom Bandwidth Cap (KB/s)</Label>
+                  <Input
+                    id="custom_speed"
+                    type="number"
+                    min={100}
+                    placeholder="e.g. 2048 (leave empty for unlimited)"
+                    value={settings?.max_download_speed ?? ""}
+                    onChange={(e) => {
+                      const val = e.target.value ? parseInt(e.target.value) : null
+                      handleSettingChange("max_download_speed", val)
+                    }}
+                    className="max-w-xs bg-background/50 border-border/40"
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    Current limit: {settings?.max_download_speed ? `${(settings.max_download_speed / 1024).toFixed(1)} MB/s (${settings.max_download_speed} KB/s)` : "No limit (Full speed)"}
+                  </p>
+                </div>
+              </CardContent>
+            </Card>
+
+            <Card className="border-border/40 bg-card/60 shadow-sm backdrop-blur">
+              <CardHeader>
                 <CardTitle className="text-lg font-heading">Default Quality Target</CardTitle>
                 <CardDescription>Target resolution when multiple video qualities are available</CardDescription>
               </CardHeader>
@@ -446,6 +588,283 @@ export default function SettingsPage() {
                   </div>
                   <Switch defaultChecked={true} />
                 </div>
+              </CardContent>
+            </Card>
+
+            {/* API Access & Rate Limiting Card */}
+            <Card className="border-border/40 bg-card/60 shadow-sm backdrop-blur">
+              <CardHeader>
+                <div className="flex items-center justify-between">
+                  <CardTitle className="text-lg font-heading flex items-center gap-2">
+                    <Lock className="h-5 w-5 text-primary" />
+                    API Access & Rate Limiting
+                  </CardTitle>
+                  {settings?.api_key ? (
+                    <span className="px-2.5 py-0.5 rounded-full text-xs font-medium bg-emerald-500/10 text-emerald-500 border border-emerald-500/20 flex items-center gap-1">
+                      <Check className="h-3 w-3" />
+                      Key Active
+                    </span>
+                  ) : (
+                    <span className="px-2.5 py-0.5 rounded-full text-xs font-medium bg-muted text-muted-foreground">
+                      No Key Generated
+                    </span>
+                  )}
+                </div>
+                <CardDescription>
+                  Configure API token authentication and request throttling (SlowAPI) for external apps, CLI tools, and browser extensions.
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-6">
+                {/* Active Key Display & Actions */}
+                <div className="space-y-2">
+                  <Label>Active API Key</Label>
+                  <div className="flex flex-col sm:flex-row gap-2">
+                    <div className="relative flex-1">
+                      <Input
+                        type={showApiKey ? "text" : "password"}
+                        readOnly
+                        value={settings?.api_key || ""}
+                        placeholder="No key generated yet. Click generate to create one."
+                        className="font-mono text-sm bg-background/50 border-border/40 pr-20"
+                      />
+                      {settings?.api_key && (
+                        <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-1">
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon"
+                            className="h-7 w-7 text-muted-foreground hover:text-foreground"
+                            onClick={() => setShowApiKey(!showApiKey)}
+                            title={showApiKey ? "Hide Key" : "Reveal Key"}
+                          >
+                            {showApiKey ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
+                          </Button>
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon"
+                            className="h-7 w-7 text-muted-foreground hover:text-foreground"
+                            onClick={handleCopyKey}
+                            title="Copy API Key"
+                          >
+                            {isCopied ? <Check className="h-3.5 w-3.5 text-emerald-500" /> : <Copy className="h-3.5 w-3.5" />}
+                          </Button>
+                        </div>
+                      )}
+                    </div>
+                    <div className="flex gap-2 shrink-0">
+                      <Button
+                        type="button"
+                        variant="outline"
+                        onClick={handleGenerateKey}
+                        disabled={isGeneratingKey}
+                        className="gap-2 border-border/40 hover:bg-accent"
+                      >
+                        {isGeneratingKey ? (
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                        ) : (
+                          <RefreshCw className="h-4 w-4" />
+                        )}
+                        {settings?.api_key ? "Rotate Key" : "Generate Key"}
+                      </Button>
+                      {settings?.api_key && (
+                        <Button
+                          type="button"
+                          variant="outline"
+                          onClick={handleDeleteKey}
+                          className="gap-1.5 text-destructive hover:bg-destructive/10 border-destructive/20"
+                          title="Revoke and delete API Key"
+                        >
+                          <Trash2 className="h-4 w-4" />
+                          Revoke
+                        </Button>
+                      )}
+                    </div>
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    Pass this key in your request header: <code className="text-primary font-mono">X-API-Key: omni_live_...</code> or <code className="text-primary font-mono">Authorization: Bearer omni_live_...</code>
+                  </p>
+                </div>
+
+                {/* Authentication Switch & Rate Limit Settings */}
+                <div className="grid gap-4 sm:grid-cols-2 pt-2 border-t border-border/30">
+                  <div className="flex items-center justify-between p-3.5 rounded-lg bg-background/30 border border-border/20">
+                    <div className="space-y-0.5 pr-2">
+                      <Label className="text-sm font-medium">Require API Key for External Access</Label>
+                      <p className="text-xs text-muted-foreground">
+                        Block unauthenticated external requests with HTTP 401/403
+                      </p>
+                    </div>
+                    <Switch
+                      checked={Boolean(settings?.require_api_key)}
+                      disabled={!settings?.api_key}
+                      onCheckedChange={(v) => handleSettingChange("require_api_key", v)}
+                    />
+                  </div>
+
+                  <div className="space-y-2 p-3.5 rounded-lg bg-background/30 border border-border/20">
+                    <div className="flex items-center justify-between">
+                      <Label htmlFor="rate_limit_per_minute" className="text-sm font-medium">
+                        SlowAPI Throttle (Requests/min)
+                      </Label>
+                      <span className="text-xs font-mono text-muted-foreground">
+                        {settings?.rate_limit_per_minute || 60}/min
+                      </span>
+                    </div>
+                    <Input
+                      id="rate_limit_per_minute"
+                      type="number"
+                      min={10}
+                      max={600}
+                      step={10}
+                      value={settings?.rate_limit_per_minute || 60}
+                      onChange={(e) => handleSettingChange("rate_limit_per_minute", parseInt(e.target.value) || 60)}
+                      className="bg-background/50 border-border/40 font-mono text-sm h-8"
+                    />
+                    <p className="text-[11px] text-muted-foreground">
+                      Rate limit bucket tracked per API key or client IP address
+                    </p>
+                  </div>
+                </div>
+
+                {/* Developer Integration Code Example */}
+                <div className="rounded-lg bg-background/50 border border-border/30 p-3 space-y-2">
+                  <div className="flex items-center justify-between text-xs text-muted-foreground">
+                    <span className="font-semibold text-foreground flex items-center gap-1.5">
+                      <FileText className="h-3.5 w-3.5 text-primary" />
+                      cURL Quickstart Example
+                    </span>
+                    <span className="font-mono text-[11px]">POST /api/analyze</span>
+                  </div>
+                  <pre className="p-2.5 rounded bg-muted/30 text-[11px] font-mono text-muted-foreground overflow-x-auto select-all leading-relaxed">
+{`curl -X POST http://localhost:8000/api/analyze \\
+  -H "Content-Type: application/json" \\
+  -H "X-API-Key: ${settings?.api_key || "<YOUR_API_KEY>"}" \\
+  -d '{"url": "https://example.com/live/playlist.m3u8"}'`}
+                  </pre>
+                </div>
+              </CardContent>
+            </Card>
+
+            <Card className="border-border/40 bg-card/60 shadow-sm backdrop-blur">
+              <CardHeader>
+                <div className="flex items-center justify-between">
+                  <CardTitle className="text-lg font-heading flex items-center gap-2">
+                    <Key className="h-5 w-5 text-primary" />
+                    Authentication & Cookies (cookies.txt)
+                  </CardTitle>
+                  {cookieStatus?.exists ? (
+                    <span className="px-2.5 py-0.5 rounded-full text-xs font-medium bg-emerald-500/10 text-emerald-500 border border-emerald-500/20 flex items-center gap-1">
+                      <Check className="h-3 w-3" />
+                      Active ({cookieStatus.line_count} cookies)
+                    </span>
+                  ) : (
+                    <span className="px-2.5 py-0.5 rounded-full text-xs font-medium bg-muted text-muted-foreground">
+                      No cookies loaded
+                    </span>
+                  )}
+                </div>
+                <CardDescription className="space-y-1">
+                  <p>Import Netscape-format cookies to download age-restricted, premium, or private videos from YouTube, Instagram, etc.</p>
+                  <p className="text-[11px] text-primary/90 font-medium">💡 Quickest method: Click &quot;🔑 Sync Browser Cookies&quot; in the OmniDownload browser extension popup to sync your active session in 1 click.</p>
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="flex flex-wrap gap-2">
+                  <label className="cursor-pointer">
+                    <input
+                      type="file"
+                      accept=".txt"
+                      className="hidden"
+                      onChange={async (e) => {
+                        const file = e.target.files?.[0]
+                        if (file) {
+                          setIsUploadingCookies(true)
+                          try {
+                            await api.uploadCookies(file)
+                            const status = await api.getCookiesStatus()
+                            setCookieStatus(status)
+                            toast({ title: "Cookies Uploaded", description: "Cookie file active for media extractors." })
+                          } catch (err: any) {
+                            toast({ title: "Upload Failed", description: err.message, variant: "destructive" })
+                          } finally {
+                            setIsUploadingCookies(false)
+                          }
+                        }
+                      }}
+                    />
+                    <Button variant="outline" size="sm" asChild className="gap-2 border-border/40 hover:bg-accent" disabled={isUploadingCookies}>
+                      <span>
+                        {isUploadingCookies ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
+                        Upload cookies.txt
+                      </span>
+                    </Button>
+                  </label>
+
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setShowCookiePaste(!showCookiePaste)}
+                    className="gap-2 border-border/40 hover:bg-accent"
+                  >
+                    <FileText className="h-4 w-4" />
+                    {showCookiePaste ? "Hide Editor" : "Paste Cookies Text"}
+                  </Button>
+
+                  {cookieStatus?.exists && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={async () => {
+                        if (confirm("Delete stored cookies?")) {
+                          await api.deleteCookies()
+                          const status = await api.getCookiesStatus()
+                          setCookieStatus(status)
+                          toast({ title: "Cookies Removed" })
+                        }
+                      }}
+                      className="gap-1.5 text-destructive hover:bg-destructive/10 border-destructive/20 ml-auto"
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                      Remove Cookies
+                    </Button>
+                  )}
+                </div>
+
+                {showCookiePaste && (
+                  <div className="space-y-2 pt-2 animate-in fade-in">
+                    <textarea
+                      rows={5}
+                      placeholder="# Netscape HTTP Cookie File&#10;.youtube.com&#9;TRUE&#9;/&#9;TRUE&#9;1740000000&#9;VISITOR_INFO1_LIVE&#9;xyz..."
+                      value={cookieText}
+                      onChange={(e) => setCookieText(e.target.value)}
+                      className="w-full p-3 font-mono text-xs rounded-xl bg-background/60 border border-border/60 outline-none focus:border-primary resize-none leading-relaxed"
+                    />
+                    <Button
+                      size="sm"
+                      disabled={!cookieText.trim() || isUploadingCookies}
+                      onClick={async () => {
+                        setIsUploadingCookies(true)
+                        try {
+                          await api.uploadCookies(undefined, cookieText)
+                          setCookieText("")
+                          setShowCookiePaste(false)
+                          const status = await api.getCookiesStatus()
+                          setCookieStatus(status)
+                          toast({ title: "Cookies Saved", description: "Active for all extractors." })
+                        } catch (err: any) {
+                          toast({ title: "Save Failed", description: err.message, variant: "destructive" })
+                        } finally {
+                          setIsUploadingCookies(false)
+                        }
+                      }}
+                      className="gap-2 gradient-primary text-white text-xs h-8"
+                    >
+                      <Save className="h-3.5 w-3.5" />
+                      Save Pasted Cookies
+                    </Button>
+                  </div>
+                )}
               </CardContent>
             </Card>
 

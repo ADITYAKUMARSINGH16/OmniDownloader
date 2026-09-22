@@ -1,4 +1,4 @@
-import type { Metadata } from "next"
+import type { Metadata, Viewport } from "next"
 import { Inter, Outfit } from "next/font/google"
 import "./globals.css"
 import { Providers } from "./providers"
@@ -9,7 +9,15 @@ const outfit = Outfit({ subsets: ["latin"], variable: "--font-outfit" })
 export const metadata: Metadata = {
   title: "OmniDownload - Universal Media & File Downloader",
   description: "Download videos, audio, and files from any website with a modern, premium experience.",
+  manifest: "/manifest.json",
+  applicationName: "OmniDownload",
 }
+
+export const viewport: Viewport = {
+  themeColor: "#6366f1",
+}
+
+
 
 export default function RootLayout({
   children,

@@ -2,6 +2,7 @@ from abc import ABC, abstractmethod
 from typing import Optional, List, Dict, Any
 from dataclasses import dataclass, field
 from pydantic import HttpUrl
+import os
 import yt_dlp
 
 from models.schemas import FormatModel, ContentType, AnalyzeResponse
@@ -27,15 +28,26 @@ class BaseExtractor(ABC):
     domains: List[str] = []
     
     def __init__(self):
+        cookies_path = os.path.join(os.getcwd(), "data", "cookies.txt")
         self.ydl_opts = {
             "quiet": True,
             "no_warnings": True,
             "extract_flat": False,
             "noplaylist": True,
             "socket_timeout": settings.request_timeout,
-            "retries": 3,
+            "retries": 5,
             "user_agent": settings.user_agent,
+            "js_runtimes": {"node": {}},
+            "remote_components": ["ejs:github"],
+            "extractor_args": {
+                "youtube": {
+                    "player_client": ["web", "web_safari", "mweb"],
+                }
+            },
         }
+        if os.path.exists(cookies_path) and os.path.getsize(cookies_path) > 0:
+            self.ydl_opts["cookiefile"] = cookies_path
+
     
     def matches_domain(self, url: str) -> bool:
         try:
@@ -165,12 +177,19 @@ class ExtractorRegistry:
         parsed = HttpUrl(url)
         domain = parsed.host.lower() if parsed.host else ""
         
+        # 1. Match specific extractors (excluding generic)
         for extractor in cls._extractors:
-            if extractor.supports(url):
+            if extractor.name != "generic" and extractor.supports(url):
                 return extractor
         
+        # 2. Match registered domain map
         for registered_domain, extractor in cls._domain_map.items():
-            if domain.endswith(registered_domain):
+            if domain == registered_domain or domain.endswith("." + registered_domain):
+                return extractor
+        
+        # 3. Fallback to generic extractor
+        for extractor in cls._extractors:
+            if extractor.name == "generic" and extractor.supports(url):
                 return extractor
         
         return None

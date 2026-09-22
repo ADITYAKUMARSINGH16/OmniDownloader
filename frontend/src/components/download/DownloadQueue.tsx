@@ -87,6 +87,7 @@ function DownloadItem({ download }: { download: DownloadInfo }) {
     paused: { icon: PauseCircle, label: "Paused", dotColor: "bg-amber-400", animate: false },
     queued: { icon: Clock, label: "Queued", dotColor: "bg-slate-400", animate: false },
     cancelled: { icon: XCircle, label: "Cancelled", dotColor: "bg-slate-400", animate: false },
+    scheduled: { icon: Clock, label: "Scheduled", dotColor: "bg-purple-400", animate: false },
   }
 
   const status = statusConfig[download.status] || statusConfig.queued
@@ -344,6 +345,21 @@ export function DownloadQueue({ compact = false }: { compact?: boolean }) {
               if (data.downloaded != null) updates.downloaded_size = data.downloaded
               if (data.total != null && data.total > 0) updates.file_size = data.total
               updateDownload(data.download_id, updates)
+
+              // Browser System Notification
+              if (typeof window !== "undefined" && "Notification" in window) {
+                if (data.status === "completed" && Notification.permission === "granted") {
+                  new Notification("OmniDownloader: Download Complete 🎉", {
+                    body: "Your media download has finished successfully!",
+                    icon: "/favicon.ico",
+                  })
+                } else if (data.status === "failed" && Notification.permission === "granted") {
+                  new Notification("OmniDownloader: Download Failed ❌", {
+                    body: data.error || "A download encountered an error.",
+                    icon: "/favicon.ico",
+                  })
+                }
+              }
             }
           } catch {
             // ignore parse errors

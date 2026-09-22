@@ -9,8 +9,13 @@ const SUPPORTED_DOMAINS = [
   'x.com',
   'instagram.com',
   'instagr.am',
+  'tiktok.com',
   'facebook.com',
   'fb.watch',
+  'soundcloud.com',
+  'vimeo.com',
+  'pinterest.com',
+  'pin.it',
   'terabox.com',
   'teraboxapp.com',
   '1024terabox.com',
@@ -18,9 +23,10 @@ const SUPPORTED_DOMAINS = [
 ]
 
 function isSupportedUrl(url) {
+  if (!url || typeof url !== 'string') return false
   try {
-    const hostname = new URL(url).hostname.replace('www.', '')
-    return SUPPORTED_DOMAINS.some(domain => hostname.includes(domain))
+    const hostname = new URL(url).hostname.replace('www.', '').toLowerCase()
+    return SUPPORTED_DOMAINS.some(domain => hostname === domain || hostname.endsWith('.' + domain))
   } catch {
     return false
   }
@@ -29,6 +35,10 @@ function isSupportedUrl(url) {
 function findMediaElements() {
   const mediaUrls = new Set()
   
+  if (isSupportedUrl(window.location.href)) {
+    mediaUrls.add(window.location.href)
+  }
+
   document.querySelectorAll('video, audio').forEach(el => {
     if (el.src && isSupportedUrl(el.src)) {
       mediaUrls.add(el.src)
@@ -122,6 +132,14 @@ observer.observe(document.body, {
 })
 
 attachDownloadButtons()
+
+window.addEventListener('yt-navigate-finish', () => {
+  setTimeout(attachDownloadButtons, 500)
+})
+
+window.addEventListener('popstate', () => {
+  setTimeout(attachDownloadButtons, 500)
+})
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.type === 'GET_MEDIA_URLS') {

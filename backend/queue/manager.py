@@ -25,6 +25,49 @@ class DownloadQueue:
 
     def set_engine(self, engine: Any):
         self._engine = engine
+        try:
+            loop = asyncio.get_running_loop()
+            loop.create_task(self.start_scheduler())
+        except RuntimeError:
+            pass
+
+    async def start_scheduler(self):
+        """Polls every 5 seconds for scheduled downloads whose trigger time has arrived."""
+        while True:
+            try:
+                await self.check_scheduled()
+            except Exception as e:
+                logger.error(f"Error in scheduler check: {e}")
+            await asyncio.sleep(5)
+
+    async def check_scheduled(self):
+        from core.database import AsyncSessionLocal
+        from models.database import Download, DownloadStatus
+        from sqlalchemy import select
+
+        now = datetime.now(timezone.utc).replace(tzinfo=None)
+        due_items = []
+        try:
+            async with AsyncSessionLocal() as session:
+                stmt = select(Download).where(
+                    Download.status == DownloadStatus.SCHEDULED,
+                    Download.scheduled_at <= now,
+                )
+                result = await session.execute(stmt)
+                downloads = result.scalars().all()
+                for d in downloads:
+                    due_items.append((d.id, d.priority))
+                    d.status = DownloadStatus.QUEUED
+                if due_items:
+                    await session.commit()
+        except Exception as err:
+            logger.debug(f"DB scheduler check error: {err}")
+            return
+
+        for download_id, priority in due_items:
+            logger.info(f"Promoting scheduled download {download_id} to active queue")
+            await self.add(download_id, priority=priority)
+
 
     async def add(self, download_id: str, priority: int = 0) -> None:
         # Remove if already in queue

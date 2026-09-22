@@ -1,13 +1,16 @@
 import os
+import io
+import csv
 import uuid
 import json
 import logging
 import subprocess
 import platform
+import secrets
 from typing import Optional, List, Any
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, HTTPException, Depends, Query, status
+from fastapi import APIRouter, HTTPException, Depends, Query, status, Response, UploadFile, File, Form, Request
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from sqlalchemy import select, update, delete, desc, asc
@@ -16,22 +19,33 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from core.config import settings
 from core.database import get_db, AsyncSessionLocal
 from core.exceptions import handle_exception, NotFoundError, ValidationError, UnsupportedSourceError
-from core.security import validate_url, check_ssrf, sanitize_folder_path
+from core.security import validate_url, check_ssrf, sanitize_folder_path, verify_api_key
+from core.limiter import limiter
 from models.database import Download, DownloadHistory, Settings as DBSettings, DownloadStatus as DBDownloadStatus, ContentType as DBContentType
 from models.schemas import (
     AnalyzeRequest,
     AnalyzeResponse,
     DownloadRequest,
     DownloadResponse,
+    BatchDownloadRequest,
+    BatchDownloadResponse,
+    BatchDownloadResult,
+    CookieStatusResponse,
     DownloadInfo,
     QueueStatus,
     HistoryItem,
     SettingsModel,
     SettingsUpdate,
+    ApiKeyGenerateResponse,
     FormatModel,
     ContentType,
     DownloadStatus,
+    AnalyticsStatsResponse,
+    SourceStat,
+    FormatStat,
+    DailyActivity,
 )
+
 from extractors.base import ExtractorRegistry
 from download.engine import download_engine
 from queue.manager import queue_manager
@@ -80,6 +94,7 @@ def db_download_to_info(d: Download) -> DownloadInfo:
         updated_at=d.updated_at,
         started_at=d.started_at,
         completed_at=d.completed_at,
+        scheduled_at=d.scheduled_at,
     )
 
 
@@ -112,8 +127,10 @@ def db_history_to_item(h: DownloadHistory) -> HistoryItem:
     )
 
 
-@router.post("/analyze", response_model=AnalyzeResponse)
-async def analyze_url(req: AnalyzeRequest):
+@router.post("/analyze", response_model=AnalyzeResponse, tags=["Analysis"])
+@limiter.limit("60/minute")
+async def analyze_url(req: AnalyzeRequest, request: Request, response: Response, api_key: Optional[str] = Depends(verify_api_key)):
+    """Analyze a media URL to fetch video/audio metadata, formats, and thumbnail preview."""
     url_str = str(req.url)
     try:
         validated_url = validate_url(url_str)
@@ -139,8 +156,10 @@ async def analyze_url(req: AnalyzeRequest):
         raise handle_exception(e)
 
 
-@router.post("/download", response_model=DownloadResponse)
-async def create_download(req: DownloadRequest, db: AsyncSession = Depends(get_db)):
+@router.post("/download", response_model=DownloadResponse, tags=["Downloads"])
+@limiter.limit("60/minute")
+async def create_download(req: DownloadRequest, request: Request, response: Response, db: AsyncSession = Depends(get_db), api_key: Optional[str] = Depends(verify_api_key)):
+    """Queue a media download or schedule it for future automated execution."""
     url_str = str(req.url)
     try:
         validated_url = validate_url(url_str)
@@ -152,7 +171,31 @@ async def create_download(req: DownloadRequest, db: AsyncSession = Depends(get_d
         download_id = uuid.uuid4().hex[:12]
         now = datetime.now(timezone.utc).replace(tzinfo=None)
 
-        content_type = DBContentType.VIDEO if req.is_video else (DBContentType.AUDIO if req.is_audio else DBContentType.UNKNOWN)
+        extra_meta = {}
+        if req.audio_only:
+            extra_meta["audio_only"] = True
+            extra_meta["audio_format"] = req.audio_format or "mp3"
+            extra_meta["audio_bitrate"] = req.audio_bitrate or "320k"
+            content_type = DBContentType.AUDIO
+        else:
+            content_type = DBContentType.VIDEO if req.is_video else (DBContentType.AUDIO if req.is_audio else DBContentType.UNKNOWN)
+
+        if req.speed_limit_kbps:
+            extra_meta["speed_limit_kbps"] = req.speed_limit_kbps
+
+        format_label = req.format or (f"Audio {req.audio_format.upper() if req.audio_format else 'MP3'}" if req.audio_only else None)
+
+        scheduled_at_clean = None
+        is_scheduled = False
+        if req.scheduled_at:
+            sched = req.scheduled_at
+            if sched.tzinfo is not None:
+                sched = sched.astimezone(timezone.utc).replace(tzinfo=None)
+            if sched > now:
+                is_scheduled = True
+                scheduled_at_clean = sched
+
+        initial_status = DBDownloadStatus.SCHEDULED if is_scheduled else DBDownloadStatus.QUEUED
 
         # Create database record
         download = Download(
@@ -162,29 +205,153 @@ async def create_download(req: DownloadRequest, db: AsyncSession = Depends(get_d
             title=req.title,
             thumbnail=req.thumbnail,
             duration=req.duration,
-            format=req.format,
+            format=format_label,
             content_type=content_type,
             file_size=req.file_size or 0,
-            status=DBDownloadStatus.QUEUED,
+            status=initial_status,
             priority=req.priority,
             format_id=req.format_id,
             output_path=req.output_path,
+            scheduled_at=scheduled_at_clean,
+            extra_metadata=json.dumps(extra_meta) if extra_meta else None,
             created_at=now,
         )
         db.add(download)
         await db.commit()
 
-        # Add to download queue
-        await queue_manager.add(download_id, priority=req.priority)
+        # Add to download queue if not scheduled
+        if not is_scheduled:
+            await queue_manager.add(download_id, priority=req.priority)
 
-        return DownloadResponse(id=download_id, status=DownloadStatus.QUEUED)
+        return DownloadResponse(
+            id=download_id,
+            status=DownloadStatus.SCHEDULED if is_scheduled else DownloadStatus.QUEUED,
+        )
     except Exception as e:
         logger.error(f"Error creating download for {url_str}: {e}")
         raise handle_exception(e)
 
 
-@router.get("/download/{download_id}", response_model=DownloadInfo)
+@router.post("/batch-download", response_model=BatchDownloadResponse, tags=["Downloads"])
+@limiter.limit("30/minute")
+async def batch_download(req: BatchDownloadRequest, request: Request, response: Response, db: AsyncSession = Depends(get_db), api_key: Optional[str] = Depends(verify_api_key)):
+    """Queue multiple media URLs for download at once or schedule batch processing."""
+    results: list[BatchDownloadResult] = []
+    queued = 0
+    failed = 0
+
+    batch_meta = {}
+    if req.audio_only:
+        batch_meta["audio_only"] = True
+        batch_meta["audio_format"] = req.audio_format or "mp3"
+        batch_meta["audio_bitrate"] = req.audio_bitrate or "320k"
+    if req.speed_limit_kbps:
+        batch_meta["speed_limit_kbps"] = req.speed_limit_kbps
+
+    scheduled_at_clean = None
+    is_scheduled = False
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    if req.scheduled_at:
+        sched = req.scheduled_at
+        if sched.tzinfo is not None:
+            sched = sched.astimezone(timezone.utc).replace(tzinfo=None)
+        if sched > now:
+            is_scheduled = True
+            scheduled_at_clean = sched
+
+    initial_status = DBDownloadStatus.SCHEDULED if is_scheduled else DBDownloadStatus.QUEUED
+
+    for raw_url in req.urls:
+        try:
+            validated_url = validate_url(raw_url.strip())
+            await check_ssrf(validated_url)
+
+            extractor = ExtractorRegistry.get_extractor(validated_url)
+            source = extractor.name if extractor else "generic"
+
+            # Quick analyze to get title + thumbnail + format details
+            title = None
+            thumbnail = None
+            duration = None
+            detected_format = f"Audio {req.audio_format.upper() if req.audio_format else 'MP3'}" if req.audio_only else None
+            detected_format_id = req.format_id
+            detected_file_size = 0
+
+            if extractor:
+                try:
+                    info = await extractor.analyze(validated_url)
+                    title = info.title
+                    thumbnail = info.thumbnail
+                    duration = info.duration
+                    if info.formats:
+                        first_fmt = info.formats[0]
+                        detected_format_id = detected_format_id or first_fmt.format_id
+                        detected_format = detected_format or first_fmt.quality
+                        detected_file_size = first_fmt.filesize or 0
+                except Exception as analyze_err:
+                    logger.warning(f"Batch analyze failed for {raw_url}: {analyze_err}")
+
+            download_id = uuid.uuid4().hex[:12]
+
+            if req.audio_only:
+                content_type = DBContentType.AUDIO
+            else:
+                content_type = (
+                    DBContentType.VIDEO if req.is_video
+                    else (DBContentType.AUDIO if req.is_audio else DBContentType.UNKNOWN)
+                )
+
+            download = Download(
+                id=download_id,
+                url=validated_url,
+                source=source,
+                title=title,
+                thumbnail=thumbnail,
+                duration=duration,
+                format=detected_format,
+                content_type=content_type,
+                file_size=detected_file_size,
+                status=initial_status,
+                priority=req.priority,
+                format_id=detected_format_id,
+                scheduled_at=scheduled_at_clean,
+                extra_metadata=json.dumps(batch_meta) if batch_meta else None,
+                created_at=now,
+            )
+            db.add(download)
+            await db.commit()
+
+            if not is_scheduled:
+                await queue_manager.add(download_id, priority=req.priority)
+
+            results.append(BatchDownloadResult(
+                url=raw_url,
+                id=download_id,
+                status="scheduled" if is_scheduled else "queued",
+                title=title,
+            ))
+            queued += 1
+
+        except Exception as e:
+            logger.error(f"Batch download failed for {raw_url}: {e}")
+            results.append(BatchDownloadResult(
+                url=raw_url,
+                status="failed",
+                error=str(e),
+            ))
+            failed += 1
+
+    return BatchDownloadResponse(
+        total=len(req.urls),
+        queued=queued,
+        failed=failed,
+        results=results,
+    )
+
+
+@router.get("/download/{download_id}", response_model=DownloadInfo, tags=["Downloads"])
 async def get_download(download_id: str, db: AsyncSession = Depends(get_db)):
+    """Fetch status, speed, progress, and metadata for a specific download."""
     result = await db.execute(select(Download).where(Download.id == download_id))
     download = result.scalar_one_or_none()
     if not download:
@@ -192,15 +359,17 @@ async def get_download(download_id: str, db: AsyncSession = Depends(get_db)):
     return db_download_to_info(download)
 
 
-@router.post("/download/{download_id}/pause")
+@router.post("/download/{download_id}/pause", tags=["Downloads"])
 async def pause_download(download_id: str):
+    """Pause an active download."""
     await download_engine.pause_download(download_id)
     await queue_manager.remove(download_id)
     return {"success": True}
 
 
-@router.post("/download/{download_id}/resume")
+@router.post("/download/{download_id}/resume", tags=["Downloads"])
 async def resume_download(download_id: str, db: AsyncSession = Depends(get_db)):
+    """Resume a paused download."""
     res = await db.execute(select(Download).where(Download.id == download_id))
     dl = res.scalar_one_or_none()
     if not dl:
@@ -212,15 +381,17 @@ async def resume_download(download_id: str, db: AsyncSession = Depends(get_db)):
     return {"success": True}
 
 
-@router.post("/download/{download_id}/cancel")
+@router.post("/download/{download_id}/cancel", tags=["Downloads"])
 async def cancel_download(download_id: str):
+    """Cancel a pending or active download."""
     await download_engine.cancel_download(download_id)
     await queue_manager.remove(download_id)
     return {"success": True}
 
 
-@router.delete("/download/{download_id}")
+@router.delete("/download/{download_id}", tags=["Downloads"])
 async def delete_download(download_id: str, db: AsyncSession = Depends(get_db)):
+    """Delete a download record from active queue and history."""
     await download_engine.cancel_download(download_id)
     await queue_manager.remove(download_id)
 
@@ -232,8 +403,9 @@ async def delete_download(download_id: str, db: AsyncSession = Depends(get_db)):
     return {"success": True}
 
 
-@router.post("/download/{download_id}/retry")
+@router.post("/download/{download_id}/retry", tags=["Downloads"])
 async def retry_download(download_id: str, db: AsyncSession = Depends(get_db)):
+    """Retry a failed or cancelled download."""
     res = await db.execute(select(Download).where(Download.id == download_id))
     dl = res.scalar_one_or_none()
     if not dl:
@@ -250,8 +422,9 @@ async def retry_download(download_id: str, db: AsyncSession = Depends(get_db)):
     return {"success": True}
 
 
-@router.get("/queue", response_model=QueueStatus)
+@router.get("/queue", response_model=QueueStatus, tags=["Queue"])
 async def get_queue(db: AsyncSession = Depends(get_db)):
+    """Get overall status of active downloads, queue size, and scheduler jobs."""
     result = await db.execute(
         select(Download).order_by(desc(Download.priority), desc(Download.created_at))
     )
@@ -261,6 +434,7 @@ async def get_queue(db: AsyncSession = Depends(get_db)):
     queued_count = sum(1 for d in downloads if d.status == DBDownloadStatus.QUEUED)
     completed_count = sum(1 for d in downloads if d.status == DBDownloadStatus.COMPLETED)
     failed_count = sum(1 for d in downloads if d.status == DBDownloadStatus.FAILED)
+    scheduled_count = sum(1 for d in downloads if d.status == DBDownloadStatus.SCHEDULED)
 
     return QueueStatus(
         downloads=[db_download_to_info(d) for d in downloads],
@@ -268,11 +442,12 @@ async def get_queue(db: AsyncSession = Depends(get_db)):
         queued_count=queued_count,
         completed_count=completed_count,
         failed_count=failed_count,
+        scheduled_count=scheduled_count,
         max_concurrent=queue_manager.max_concurrent,
     )
 
 
-@router.get("/history", response_model=List[HistoryItem])
+@router.get("/history", response_model=List[HistoryItem], tags=["History"])
 async def get_history(
     limit: int = Query(100, ge=1, le=500),
     offset: int = Query(0, ge=0),
@@ -283,6 +458,7 @@ async def get_history(
     sort_order: str = Query("desc"),
     db: AsyncSession = Depends(get_db),
 ):
+    """Retrieve historical download entries with full-text search, filtering, and sorting."""
     query = select(DownloadHistory)
 
     if search:
@@ -313,15 +489,223 @@ async def get_history(
     return [db_history_to_item(h) for h in items]
 
 
-@router.delete("/history")
+@router.delete("/history", tags=["History"])
 async def clear_history(db: AsyncSession = Depends(get_db)):
+    """Delete all records from the download history."""
     await db.execute(delete(DownloadHistory))
     await db.commit()
     return {"success": True}
 
 
-@router.get("/settings", response_model=SettingsModel)
+@router.get("/history/export", tags=["History"])
+async def export_history(
+    format: str = Query("json", regex="^(json|csv)$"),
+    db: AsyncSession = Depends(get_db),
+):
+    """Export download history as JSON or CSV."""
+    result = await db.execute(select(DownloadHistory).order_by(desc(DownloadHistory.created_at)))
+    items = result.scalars().all()
+
+    if format == "csv":
+        output = io.StringIO()
+        writer = csv.writer(output)
+        writer.writerow(["id", "url", "source", "title", "filename", "file_size", "format", "status", "created_at", "completed_at"])
+        for item in items:
+            writer.writerow([
+                item.id,
+                item.url,
+                item.source,
+                item.title or "",
+                item.filename or "",
+                item.file_size or 0,
+                item.format or "",
+                item.status.value if hasattr(item.status, "value") else str(item.status),
+                item.created_at.isoformat() if item.created_at else "",
+                item.completed_at.isoformat() if item.completed_at else "",
+            ])
+        output.seek(0)
+        return Response(
+            content=output.getvalue(),
+            media_type="text/csv",
+            headers={"Content-Disposition": "attachment; filename=omnidownload_history.csv"},
+        )
+    else:
+        data = [
+            {
+                "id": item.id,
+                "url": item.url,
+                "source": item.source,
+                "title": item.title,
+                "filename": item.filename,
+                "file_size": item.file_size,
+                "format": item.format,
+                "status": item.status.value if hasattr(item.status, "value") else str(item.status),
+                "created_at": item.created_at.isoformat() if item.created_at else None,
+                "completed_at": item.completed_at.isoformat() if item.completed_at else None,
+            }
+            for item in items
+        ]
+        return Response(
+            content=json.dumps(data, indent=2),
+            media_type="application/json",
+            headers={"Content-Disposition": "attachment; filename=omnidownload_history.json"},
+        )
+
+
+@router.post("/history/import", tags=["History"])
+async def import_history(
+    file: Optional[UploadFile] = File(None),
+    db: AsyncSession = Depends(get_db),
+):
+    """Import download history records from a JSON or CSV file."""
+    if not file:
+        raise HTTPException(status_code=400, detail="No file provided")
+
+    content_bytes = await file.read()
+    content = content_bytes.decode("utf-8", errors="ignore")
+    records = []
+
+    try:
+        if file.filename and file.filename.endswith(".csv"):
+            reader = csv.DictReader(io.StringIO(content))
+            records = list(reader)
+        else:
+            records = json.loads(content)
+            if not isinstance(records, list):
+                records = [records]
+    except Exception as parse_err:
+        raise HTTPException(status_code=400, detail=f"Failed to parse file: {str(parse_err)}")
+
+    imported_count = 0
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+
+    for r in records:
+        hid = r.get("id") or uuid.uuid4().hex[:12]
+        existing = await db.execute(select(DownloadHistory).where(DownloadHistory.id == hid))
+        if existing.scalar_one_or_none():
+            continue
+
+        hist = DownloadHistory(
+            id=hid,
+            url=r.get("url", ""),
+            source=r.get("source", "generic"),
+            title=r.get("title"),
+            filename=r.get("filename"),
+            file_size=int(r.get("file_size") or 0),
+            format=r.get("format"),
+            status=DBDownloadStatus.COMPLETED,
+            created_at=now,
+            completed_at=now,
+        )
+        db.add(hist)
+        imported_count += 1
+
+    await db.commit()
+    return {"success": True, "imported_count": imported_count}
+
+
+@router.get("/analytics/stats", response_model=AnalyticsStatsResponse, tags=["Analytics"])
+async def get_analytics_stats(db: AsyncSession = Depends(get_db)):
+    """Get aggregated bandwidth, platform distribution, success metrics, and 7-day timeline."""
+    from datetime import timedelta
+
+    hist_result = await db.execute(select(DownloadHistory))
+    history_items = hist_result.scalars().all()
+
+    dl_result = await db.execute(select(Download))
+    active_dls = dl_result.scalars().all()
+
+    total_downloads = len(history_items) + len(active_dls)
+    completed_downloads = sum(1 for h in history_items if h.status == DBDownloadStatus.COMPLETED) + sum(1 for d in active_dls if d.status == DBDownloadStatus.COMPLETED)
+    failed_downloads = sum(1 for h in history_items if h.status == DBDownloadStatus.FAILED) + sum(1 for d in active_dls if d.status == DBDownloadStatus.FAILED)
+
+    active_statuses = {DBDownloadStatus.DOWNLOADING, DBDownloadStatus.QUEUED}
+    active_downloads = sum(1 for d in active_dls if d.status in active_statuses)
+    scheduled_downloads = sum(1 for d in active_dls if d.status == DBDownloadStatus.SCHEDULED)
+
+    total_bytes = sum(h.file_size or 0 for h in history_items if h.status == DBDownloadStatus.COMPLETED) + sum(d.downloaded_size or 0 for d in active_dls)
+
+    resolved_count = completed_downloads + failed_downloads
+    success_rate = round((completed_downloads / resolved_count * 100.0), 1) if resolved_count > 0 else 100.0
+
+    # Source platforms
+    source_counts: dict[str, int] = {}
+    for item in history_items:
+        src = (item.source or "generic").capitalize()
+        source_counts[src] = source_counts.get(src, 0) + 1
+    for d in active_dls:
+        src = (d.source or "generic").capitalize()
+        source_counts[src] = source_counts.get(src, 0) + 1
+
+    source_total = sum(source_counts.values()) or 1
+    sorted_sources = sorted(source_counts.items(), key=lambda x: x[1], reverse=True)[:6]
+    sources = [
+        SourceStat(source=s_name, count=cnt, percentage=round((cnt / source_total) * 100.0, 1))
+        for s_name, cnt in sorted_sources
+    ]
+
+    # Format distribution
+    format_counts: dict[str, int] = {}
+    for item in history_items:
+        fmt = (item.extension or item.format or "unknown").lower()
+        if fmt.startswith("."):
+            fmt = fmt[1:]
+        if len(fmt) > 10 or not fmt.isalnum():
+            fmt = "other"
+        format_counts[fmt] = format_counts.get(fmt, 0) + 1
+    for d in active_dls:
+        fmt = (d.extension or d.format or "unknown").lower()
+        if fmt.startswith("."):
+            fmt = fmt[1:]
+        if len(fmt) > 10 or not fmt.isalnum():
+            fmt = "other"
+        format_counts[fmt] = format_counts.get(fmt, 0) + 1
+
+    formats = [
+        FormatStat(format=fmt.upper(), count=cnt)
+        for fmt, cnt in sorted(format_counts.items(), key=lambda x: x[1], reverse=True)[:6]
+    ]
+
+    # Daily activity for last 7 days
+    today = datetime.now(timezone.utc).date()
+    daily_map = {(today - timedelta(days=i)).isoformat(): {"count": 0, "bytes": 0} for i in range(6, -1, -1)}
+
+    for item in history_items:
+        if item.created_at:
+            d_str = item.created_at.date().isoformat()
+            if d_str in daily_map:
+                daily_map[d_str]["count"] += 1
+                daily_map[d_str]["bytes"] += (item.file_size or 0)
+    for d in active_dls:
+        if d.created_at:
+            d_str = d.created_at.date().isoformat()
+            if d_str in daily_map:
+                daily_map[d_str]["count"] += 1
+                daily_map[d_str]["bytes"] += (d.downloaded_size or 0)
+
+    daily_activity = [
+        DailyActivity(date=d_key, count=vals["count"], bytes=vals["bytes"])
+        for d_key, vals in sorted(daily_map.items())
+    ]
+
+    return AnalyticsStatsResponse(
+        total_downloads=total_downloads,
+        completed_downloads=completed_downloads,
+        failed_downloads=failed_downloads,
+        active_downloads=active_downloads,
+        scheduled_downloads=scheduled_downloads,
+        total_bytes=total_bytes,
+        success_rate=success_rate,
+        sources=sources,
+        formats=formats,
+        daily_activity=daily_activity,
+    )
+
+
+
+@router.get("/settings", response_model=SettingsModel, tags=["Settings"])
 async def get_settings(db: AsyncSession = Depends(get_db)):
+    """Fetch current system configuration including download directories and concurrency limits."""
     result = await db.execute(select(DBSettings))
     rows = result.scalars().all()
     db_dict = {}
@@ -351,11 +735,15 @@ async def get_settings(db: AsyncSession = Depends(get_db)):
         auto_merge_audio_video=db_dict.get("auto_merge_audio_video", True),
         delete_temp_files=db_dict.get("delete_temp_files", True),
         theme=db_dict.get("theme", "system"),
+        api_key=db_dict.get("api_key"),
+        require_api_key=db_dict.get("require_api_key", False),
+        rate_limit_per_minute=db_dict.get("rate_limit_per_minute", 60),
     )
 
 
-@router.put("/settings", response_model=SettingsModel)
+@router.put("/settings", response_model=SettingsModel, tags=["Settings"])
 async def update_settings(update_data: SettingsUpdate, db: AsyncSession = Depends(get_db)):
+    """Update system preferences and runtime engine parameters."""
     update_dict = update_data.model_dump(exclude_unset=True)
 
     if "download_dir" in update_dict and update_dict["download_dir"]:
@@ -384,16 +772,114 @@ async def update_settings(update_data: SettingsUpdate, db: AsyncSession = Depend
     return await get_settings(db)
 
 
-@router.get("/extractors")
+@router.post("/settings/api-key/generate", response_model=ApiKeyGenerateResponse, tags=["Settings"])
+async def generate_api_key(db: AsyncSession = Depends(get_db)):
+    """Generate a new secure API key for external apps and CLI/extensions."""
+    raw_key = f"omni_live_{secrets.token_hex(20)}"
+    val_json = json.dumps(raw_key)
+
+    existing = await db.execute(select(DBSettings).where(DBSettings.key == "api_key"))
+    row = existing.scalar_one_or_none()
+    if row:
+        row.value = val_json
+    else:
+        db.add(DBSettings(key="api_key", value=val_json))
+    await db.commit()
+
+    return ApiKeyGenerateResponse(
+        api_key=raw_key,
+        created_at=datetime.now(timezone.utc),
+        message="API Key generated successfully. Save this key in a secure location.",
+    )
+
+
+@router.delete("/settings/api-key", tags=["Settings"])
+async def delete_api_key(db: AsyncSession = Depends(get_db)):
+    """Revoke active API key and disable required authentication."""
+    await db.execute(delete(DBSettings).where(DBSettings.key.in_(["api_key", "require_api_key"])))
+    await db.commit()
+    return {"success": True, "message": "API Key revoked successfully."}
+
+
+@router.get("/settings/cookies", response_model=CookieStatusResponse, tags=["Settings"])
+async def get_cookie_status():
+    """Check whether Netscape cookies.txt is currently loaded and active."""
+    cookies_path = os.path.join(os.getcwd(), "data", "cookies.txt")
+    if not os.path.exists(cookies_path):
+        return CookieStatusResponse(exists=False, size=0, line_count=0, updated_at=None)
+
+    stat = os.stat(cookies_path)
+    line_count = 0
+    try:
+        with open(cookies_path, "r", encoding="utf-8", errors="ignore") as f:
+            line_count = sum(1 for line in f if line.strip() and not line.strip().startswith("#"))
+    except Exception:
+        pass
+
+    updated_at = datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc).isoformat()
+    return CookieStatusResponse(
+        exists=True,
+        size=stat.st_size,
+        line_count=line_count,
+        updated_at=updated_at,
+    )
+
+
+@router.post("/settings/cookies", tags=["Settings"])
+async def upload_cookies(
+    request: Request,
+    file: Optional[UploadFile] = File(None),
+    raw_content: Optional[str] = Form(None),
+):
+    """Upload or paste Netscape-format cookies.txt for authenticated media downloads."""
+    os.makedirs(os.path.join(os.getcwd(), "data"), exist_ok=True)
+    cookies_path = os.path.join(os.getcwd(), "data", "cookies.txt")
+
+    content = ""
+    content_type = request.headers.get("content-type", "")
+    if content_type.startswith("application/json"):
+        try:
+            body = await request.json()
+            content = body.get("raw_content", "") or body.get("content", "")
+        except Exception:
+            pass
+    elif file:
+        content_bytes = await file.read()
+        content = content_bytes.decode("utf-8", errors="ignore")
+    elif raw_content:
+        content = raw_content
+
+    if not content or not content.strip():
+        raise HTTPException(status_code=400, detail="No cookie data or text provided")
+
+    with open(cookies_path, "w", encoding="utf-8") as f:
+        f.write(content)
+
+    return {"success": True, "message": "Cookies saved successfully"}
+
+
+@router.delete("/settings/cookies", tags=["Settings"])
+async def delete_cookies():
+    """Remove loaded cookies."""
+    cookies_path = os.path.join(os.getcwd(), "data", "cookies.txt")
+    if os.path.exists(cookies_path):
+        os.remove(cookies_path)
+    return {"success": True, "message": "Cookies deleted successfully"}
+
+
+
+@router.get("/extractors", tags=["Extractors"])
 async def get_extractors():
+    """List all registered media extractors and their recognized web domains."""
     exts = ExtractorRegistry.get_all_extractors()
     return {
         "extractors": [{"name": e.name, "domains": e.domains} for e in exts]
     }
 
 
-@router.get("/download/{download_id}/file")
+@router.get("/download/{download_id}/file", tags=["Downloads"])
 async def get_download_file(download_id: str, db: AsyncSession = Depends(get_db)):
+    """Stream or download the completed local file."""
     result = await db.execute(select(Download).where(Download.id == download_id))
     dl = result.scalar_one_or_none()
     if not dl or not dl.output_path or not os.path.exists(dl.output_path):
@@ -411,8 +897,9 @@ class OpenFolderRequest(BaseModel):
     path: Optional[str] = None
 
 
-@router.post("/open-folder")
+@router.post("/open-folder", tags=["System"])
 async def open_folder(req: OpenFolderRequest, db: AsyncSession = Depends(get_db)):
+    """Reveal a downloaded file or open target directory in the OS file explorer."""
     target_path = None
     if req.download_id:
         result = await db.execute(select(Download).where(Download.id == req.download_id))
@@ -462,7 +949,8 @@ async def open_folder(req: OpenFolderRequest, db: AsyncSession = Depends(get_db)
         return {"success": False, "error": str(e), "path": full_path}
 
 
-@router.post("/download/{download_id}/open-folder")
+@router.post("/download/{download_id}/open-folder", tags=["System"])
 async def open_download_folder(download_id: str, db: AsyncSession = Depends(get_db)):
+    """Reveal a specific download in the OS file explorer."""
     return await open_folder(OpenFolderRequest(download_id=download_id), db)
 

@@ -49,8 +49,21 @@ class YouTubeExtractor(BaseExtractor):
                     content_type=ContentType.VIDEO,
                 )
         except yt_dlp.utils.DownloadError as e:
-            raise ExtractionError(f"YouTube extraction failed: {str(e)}")
+            msg = str(e)
+            if "This video is unavailable" in msg:
+                clean_msg = "This video is unavailable, private, or has been removed from YouTube."
+            elif "Private video" in msg:
+                clean_msg = "This video is private. Please provide cookies in Settings to access private content."
+            elif "Sign in to confirm your age" in msg:
+                clean_msg = "This video is age-restricted. Please configure YouTube cookies in Settings to download."
+            elif "HTTP Error 403" in msg:
+                clean_msg = "YouTube stream access was forbidden (403). Retrying with alternate player client..."
+            else:
+                clean_msg = f"YouTube extraction failed: {msg.split('ERROR:')[-1].strip() if 'ERROR:' in msg else msg}"
+            raise ExtractionError(clean_msg)
         except Exception as e:
+            if isinstance(e, ExtractionError):
+                raise
             raise ExtractionError(f"Unexpected error: {str(e)}")
 
 

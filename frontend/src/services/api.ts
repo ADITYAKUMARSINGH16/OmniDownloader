@@ -4,13 +4,19 @@ import type {
   DownloadInfo, 
   DownloadRequest, 
   DownloadResponse, 
+  BatchDownloadRequest,
+  BatchDownloadResponse,
   QueueStatus, 
   HistoryItem, 
   Settings, 
   SettingsUpdate,
+  ApiKeyResponse,
   Extractor,
-  ProgressUpdate 
+  ProgressUpdate,
+  CookieStatus,
+  AnalyticsStats
 } from "@/types"
+
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "/api"
 
@@ -28,6 +34,16 @@ class ApiService {
       headers: {
         "Content-Type": "application/json",
       },
+    })
+
+    this.client.interceptors.request.use((config) => {
+      if (typeof window !== "undefined") {
+        const storedKey = localStorage.getItem("omni_api_key")
+        if (storedKey) {
+          config.headers["X-API-Key"] = storedKey
+        }
+      }
+      return config
     })
 
     this.client.interceptors.response.use(
@@ -48,6 +64,11 @@ class ApiService {
 
   async startDownload(request: DownloadRequest): Promise<DownloadResponse> {
     const response = await this.client.post<DownloadResponse>("/download", request)
+    return response.data
+  }
+
+  async batchDownload(request: BatchDownloadRequest): Promise<BatchDownloadResponse> {
+    const response = await this.client.post<BatchDownloadResponse>("/batch-download", request)
     return response.data
   }
 
@@ -108,6 +129,16 @@ class ApiService {
     return response.data
   }
 
+  async generateApiKey(): Promise<ApiKeyResponse> {
+    const response = await this.client.post<ApiKeyResponse>("/settings/api-key/generate")
+    return response.data
+  }
+
+  async deleteApiKey(): Promise<{ success: boolean; message: string }> {
+    const response = await this.client.delete<{ success: boolean; message: string }>("/settings/api-key")
+    return response.data
+  }
+
   async getExtractors(): Promise<{ extractors: Extractor[] }> {
     const response = await this.client.get<{ extractors: Extractor[] }>("/extractors")
     return response.data
@@ -118,6 +149,47 @@ class ApiService {
       download_id: id,
       path,
     })
+    return response.data
+  }
+
+  async getCookiesStatus(): Promise<CookieStatus> {
+    const response = await this.client.get<CookieStatus>("/settings/cookies")
+    return response.data
+  }
+
+  async uploadCookies(file?: File, rawContent?: string): Promise<{ success: boolean; message: string }> {
+    const formData = new FormData()
+    if (file) {
+      formData.append("file", file)
+    }
+    if (rawContent) {
+      formData.append("raw_content", rawContent)
+    }
+    const response = await this.client.post<{ success: boolean; message: string }>("/settings/cookies", formData)
+    return response.data
+  }
+
+  async deleteCookies(): Promise<{ success: boolean; message: string }> {
+    const response = await this.client.delete<{ success: boolean; message: string }>("/settings/cookies")
+    return response.data
+  }
+
+  async exportHistory(format: "json" | "csv" = "json"): Promise<Blob> {
+    const response = await this.client.get(`/history/export?format=${format}`, {
+      responseType: "blob",
+    })
+    return response.data
+  }
+
+  async importHistory(file: File): Promise<{ success: boolean; imported_count: number }> {
+    const formData = new FormData()
+    formData.append("file", file)
+    const response = await this.client.post<{ success: boolean; imported_count: number }>("/history/import", formData)
+    return response.data
+  }
+
+  async getAnalyticsStats(): Promise<AnalyticsStats> {
+    const response = await this.client.get<AnalyticsStats>("/analytics/stats")
     return response.data
   }
 

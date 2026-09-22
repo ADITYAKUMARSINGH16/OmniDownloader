@@ -180,21 +180,68 @@ class DownloadEngine:
 
 
         try:
+            extra_meta = {}
+            async with AsyncSessionLocal() as session:
+                res = await session.execute(select(Download).where(Download.id == download_id))
+                dl_record = res.scalar_one_or_none()
+                if dl_record and dl_record.extra_metadata:
+                    try:
+                        extra_meta = json.loads(dl_record.extra_metadata)
+                    except Exception:
+                        pass
+
+            speed_limit_kbps = extra_meta.get("speed_limit_kbps")
+            if not speed_limit_kbps:
+                try:
+                    from models.database import Settings as DBSettings
+                    async with AsyncSessionLocal() as session:
+                        setting_res = await session.execute(
+                            select(DBSettings).where(DBSettings.key == "max_download_speed")
+                        )
+                        s_row = setting_res.scalar_one_or_none()
+                        if s_row and s_row.value:
+                            speed_limit_kbps = json.loads(s_row.value)
+                except Exception:
+                    pass
+
             extractor = ExtractorRegistry.get_extractor(url)
             is_generic = extractor is not None and extractor.name == "generic"
+            is_hls = (
+                (extractor is not None and extractor.name == "hls")
+                or (format_model and format_model.protocol == "m3u8")
+                or (".m3u8" in url.lower().split("?")[0])
+            )
 
-            # Check if format_id is a direct HTTP/HTTPS URL
+            # Check if format_id or the URL itself is a direct HTTP/HTTPS media/image URL
             target_download_url = None
             if format_model and format_model.format_id and (
                 format_model.format_id.startswith("http://") or format_model.format_id.startswith("https://")
             ):
                 target_download_url = format_model.format_id
 
-            if is_generic or target_download_url:
+            clean_url_path = url.lower().split("?")[0].rstrip("/")
+            is_direct_media = (
+                any(clean_url_path.endswith(ext) for ext in [".jpg", ".jpeg", ".png", ".gif", ".webp", ".svg", ".bmp", ".ico", ".pdf", ".zip", ".tar", ".gz", ".rar", ".7z", ".exe", ".dmg", ".apk", ".iso", ".mp4", ".mp3", ".wav", ".m4a"])
+                or ("i.redd.it" in url.lower() or "preview.redd.it" in url.lower())
+            )
+
+            if is_hls or (target_download_url and ".m3u8" in target_download_url.lower().split("?")[0]):
                 dl_url = target_download_url or url
-                await self._download_generic(download_id, dl_url, target_dir)
+                await self._download_hls(
+                    download_id, dl_url, target_dir, format_model=format_model, extra_meta=extra_meta
+                )
+            elif is_generic or target_download_url or is_direct_media:
+                dl_url = target_download_url or url
+                await self._download_generic(download_id, dl_url, target_dir, speed_limit_kbps=speed_limit_kbps)
             else:
-                await self._download_ytdlp(download_id, url, format_model, target_dir)
+                await self._download_ytdlp(
+                    download_id,
+                    url,
+                    format_model,
+                    target_dir,
+                    extra_meta=extra_meta,
+                    speed_limit_kbps=speed_limit_kbps,
+                )
 
             # Mark completed
             completed_now = datetime.now(timezone.utc).replace(tzinfo=None)
@@ -269,7 +316,148 @@ class DownloadEngine:
             except Exception:
                 pass
 
-    async def _download_generic(self, download_id: str, url: str, target_dir: str) -> None:
+    async def _download_hls(
+        self,
+        download_id: str,
+        stream_url: str,
+        target_dir: str,
+        format_model: Optional[FormatModel] = None,
+        extra_meta: Optional[dict] = None,
+    ) -> None:
+        """Capture and assemble HLS (.m3u8) chunks using FFmpeg into a complete MP4 or audio file."""
+        dl_title = None
+        async with AsyncSessionLocal() as session:
+            res = await session.execute(select(Download).where(Download.id == download_id))
+            dl_record = res.scalar_one_or_none()
+            if dl_record and dl_record.title:
+                dl_title = dl_record.title
+
+        is_audio_only = extra_meta and extra_meta.get("audio_only")
+        audio_fmt = (extra_meta and extra_meta.get("audio_format")) or "mp3"
+
+        ext = audio_fmt if is_audio_only else "mp4"
+        clean_title = sanitize_filename(dl_title or f"HLS_Stream_{download_id}")[:120]
+        final_filename = f"{clean_title} [{download_id}].{ext}"
+        final_path = os.path.join(target_dir, final_filename)
+
+        async with AsyncSessionLocal() as session:
+            stmt = (
+                update(Download)
+                .where(Download.id == download_id)
+                .values(
+                    status=DownloadStatus.DOWNLOADING,
+                    output_path=final_path,
+                    filename=final_filename,
+                    extension=ext,
+                )
+            )
+            await session.execute(stmt)
+            await session.commit()
+
+        cmd = [
+            settings.ffmpeg_path,
+            "-y",
+            "-nostats",
+            "-progress", "pipe:1",
+            "-reconnect", "1",
+            "-reconnect_streamed", "1",
+            "-reconnect_delay_max", "5",
+            "-i", stream_url,
+        ]
+
+        if is_audio_only:
+            if audio_fmt == "mp3":
+                cmd.extend(["-vn", "-c:a", "libmp3lame", "-q:a", "2"])
+            else:
+                cmd.extend(["-vn", "-c:a", "copy"])
+        else:
+            cmd.extend(["-c", "copy", "-bsf:a", "aac_adtstoasc"])
+
+        cmd.append(final_path)
+
+        logger.info(f"Starting HLS FFmpeg capture for {download_id}: {' '.join(cmd)}")
+
+        process = await asyncio.create_subprocess_exec(
+            *cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+
+        last_update_time = time.time()
+        last_progress_pct = 5.0
+        total_size_bytes = 0
+
+        async def read_progress():
+            nonlocal last_update_time, last_progress_pct, total_size_bytes
+            while True:
+                line = await process.stdout.readline()
+                if not line:
+                    break
+                decoded = line.decode("utf-8", errors="ignore").strip()
+                if decoded.startswith("total_size="):
+                    try:
+                        total_size_bytes = int(decoded.split("=")[-1].strip())
+                    except ValueError:
+                        pass
+                elif decoded.startswith("out_time="):
+                    now = time.time()
+                    if now - last_update_time >= 0.5:
+                        last_update_time = now
+                        last_progress_pct = min(last_progress_pct + 2.5, 95.0)
+
+                        async with AsyncSessionLocal() as session:
+                            stmt = (
+                                update(Download)
+                                .where(Download.id == download_id)
+                                .values(
+                                    progress=last_progress_pct,
+                                    downloaded_size=total_size_bytes,
+                                    speed=2_500_000,
+                                )
+                            )
+                            await session.execute(stmt)
+                            await session.commit()
+
+                        msg = {
+                            "type": "progress",
+                            "download_id": download_id,
+                            "status": "downloading",
+                            "progress": round(last_progress_pct, 1),
+                            "downloaded": total_size_bytes,
+                            "total": 0,
+                            "speed": 2_500_000,
+                            "eta": 0,
+                        }
+                        await _get_ws_manager().send_progress(download_id, msg)
+
+        try:
+            await asyncio.gather(read_progress(), process.wait())
+        except asyncio.CancelledError:
+            process.kill()
+            raise
+
+        if process.returncode != 0:
+            stderr_out = await process.stderr.read()
+            err_text = stderr_out.decode("utf-8", errors="ignore")
+            logger.error(f"FFmpeg HLS capture failed with code {process.returncode}: {err_text}")
+            raise Exception(f"FFmpeg stream assembly failed: {err_text[-300:] if err_text else 'Unknown error'}")
+
+        actual_size = os.path.getsize(final_path) if os.path.exists(final_path) else total_size_bytes
+        async with AsyncSessionLocal() as session:
+            stmt = (
+                update(Download)
+                .where(Download.id == download_id)
+                .values(
+                    file_size=actual_size,
+                    downloaded_size=actual_size,
+                )
+            )
+            await session.execute(stmt)
+            await session.commit()
+
+    async def _download_generic(
+        self, download_id: str, url: str, target_dir: str, speed_limit_kbps: Optional[int] = None
+    ) -> None:
         headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
             "Accept": "*/*",
@@ -330,6 +518,13 @@ class DownloadEngine:
                     async for chunk in response.aiter_bytes(chunk_size=65536):
                         f.write(chunk)
                         downloaded += len(chunk)
+
+                        if speed_limit_kbps and speed_limit_kbps > 0:
+                            max_bytes_per_sec = speed_limit_kbps * 1024
+                            expected_elapsed = downloaded / max_bytes_per_sec
+                            actual_elapsed = time.time() - start_time
+                            if expected_elapsed > actual_elapsed:
+                                await asyncio.sleep(expected_elapsed - actual_elapsed)
 
                         now = time.time()
                         if now - last_update_time >= 0.5 or (total and downloaded >= total):
@@ -398,8 +593,14 @@ class DownloadEngine:
         url: str,
         format_model: Optional[FormatModel],
         target_dir: str,
+        extra_meta: Optional[Dict[str, Any]] = None,
+        speed_limit_kbps: Optional[int] = None,
     ) -> None:
         loop = asyncio.get_running_loop()
+        extra = extra_meta or {}
+        audio_only = extra.get("audio_only", False)
+        audio_format = extra.get("audio_format", "mp3")
+        audio_bitrate = str(extra.get("audio_bitrate", "320k")).rstrip("k")
 
         last_db_time = [0.0]
 
@@ -467,7 +668,9 @@ class DownloadEngine:
         # selections from colliding on the same output file. Without this,
         # yt-dlp would skip the download if a file with the same name already
         # exists on disk (e.g. a previous low-quality download).
-        format_tag = format_model.format_id if format_model and format_model.format_id else "best"
+        format_tag = f"audio_{audio_format}_{audio_bitrate}" if audio_only else (
+            format_model.format_id if format_model and format_model.format_id else "best"
+        )
         ydl_opts = {
             "outtmpl": os.path.join(target_dir, f"%(title)s [%(id)s] [{format_tag}].%(ext)s"),
             "progress_hooks": [progress_hook],
@@ -477,16 +680,42 @@ class DownloadEngine:
             "windowsfilenames": True,
             "no_color": True,
             "overwrites": True,
+            "socket_timeout": settings.request_timeout,
+            "retries": 5,
+            "user_agent": settings.user_agent,
+            "js_runtimes": {"node": {}},
+            "remote_components": ["ejs:github"],
+            "extractor_args": {
+                "youtube": {
+                    "player_client": ["web", "web_safari", "mweb"],
+                }
+            },
         }
+
+        # Cookie file support
+        cookies_path = os.path.join(os.getcwd(), "data", "cookies.txt")
+        if os.path.exists(cookies_path) and os.path.getsize(cookies_path) > 0:
+            ydl_opts["cookiefile"] = cookies_path
+
+        # Speed limit support
+        if speed_limit_kbps and speed_limit_kbps > 0:
+            ydl_opts["ratelimit"] = speed_limit_kbps * 1024
 
         def run_ytdlp():
             target_format_id = format_model.format_id if format_model and format_model.format_id else None
-            is_audio_requested = bool(format_model and format_model.is_audio and not format_model.is_video)
-            logger.info(f"Download {download_id}: format_id={target_format_id}, is_audio={is_audio_requested}, quality={format_model.quality if format_model else 'N/A'}")
+            is_audio_requested = audio_only or bool(format_model and format_model.is_audio and not format_model.is_video)
+            logger.info(f"Download {download_id}: format_id={target_format_id}, is_audio={is_audio_requested}, audio_only={audio_only}")
 
             opts = dict(ydl_opts)
 
-            if target_format_id:
+            if audio_only:
+                opts["format"] = "bestaudio/best"
+                opts["postprocessors"] = [{
+                    "key": "FFmpegExtractAudio",
+                    "preferredcodec": audio_format,
+                    "preferredquality": audio_bitrate,
+                }]
+            elif target_format_id:
                 if is_audio_requested:
                     opts["format"] = f"{target_format_id}/bestaudio/best"
                 else:
@@ -496,6 +725,13 @@ class DownloadEngine:
                             "no_warnings": True,
                             "noplaylist": True,
                             "no_color": True,
+                            "js_runtimes": {"node": {}},
+                            "remote_components": ["ejs:github"],
+                            "extractor_args": {
+                                "youtube": {
+                                    "player_client": ["web", "web_safari", "mweb"],
+                                }
+                            },
                         }) as ydl_meta:
                             meta = ydl_meta.extract_info(url, download=False)
                             if meta and "entries" in meta:
@@ -555,7 +791,7 @@ class DownloadEngine:
                         actual_filename = prep
                     else:
                         base_name, _ = os.path.splitext(prep)
-                        for ext in [".mp4", ".mkv", ".webm", ".mp3", ".m4a"]:
+                        for ext in [".mp4", ".mkv", ".webm", ".mp3", ".m4a", ".flac", ".wav", ".opus"]:
                             cand = base_name + ext
                             if os.path.exists(cand):
                                 actual_filename = cand
@@ -568,6 +804,9 @@ class DownloadEngine:
         info, filename = await loop.run_in_executor(None, run_ytdlp)
 
         file_size = os.path.getsize(filename) if filename and os.path.exists(filename) else 0
+        detected_ext = os.path.splitext(filename)[1].lstrip(".").lower() if filename else None
+        is_audio = audio_only or detected_ext in ["mp3", "m4a", "flac", "wav", "aac", "opus"]
+        ctype = ContentType.AUDIO if is_audio else ContentType.VIDEO
 
         async with AsyncSessionLocal() as session:
             stmt = (
@@ -580,6 +819,8 @@ class DownloadEngine:
                     file_size=file_size,
                     thumbnail=info.get("thumbnail"),
                     duration=info.get("duration"),
+                    extension=detected_ext,
+                    content_type=ctype,
                 )
             )
             await session.execute(stmt)
