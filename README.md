@@ -67,8 +67,8 @@ OmniDownload includes built-in launcher scripts that automatically detect your P
 
 ```bash
 # Clone repository
-git clone https://github.com/omnidownload/omnidownload.git
-cd omnidownload
+git clone https://github.com/ADITYAKUMARSINGH16/OmniDownloader.git
+cd OmniDownloader
 
 # Start services
 docker-compose up -d --build
@@ -339,6 +339,13 @@ OmniDownload is engineered with defense-in-depth security principles:
 - **Safe Filenames**: Strict sanitation ensures filenames cannot contain relative traversal sequences (`../`, `..\`) or illicit filesystem characters.
 - **Restricted Protocols**: Only `http://` and `https://` schemes are processed.
 - **Resource Protection**: Maximum file size and concurrency limits prevent disk and bandwidth exhaustion.
+
+---
+
+## 👤 Author
+
+**Aditya Kumar Singh**
+- GitHub: [@ADITYAKUMARSINGH16](https://github.com/ADITYAKUMARSINGH16)
 
 ---
 

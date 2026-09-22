@@ -72,13 +72,13 @@ export default function AboutPage() {
 
           <div className="flex items-center justify-center gap-3 pt-2">
             <Button variant="outline" size="sm" className="gap-2 text-xs" asChild>
-              <Link href="https://github.com/omnidownload" target="_blank" rel="noopener noreferrer">
+              <Link href="https://github.com/ADITYAKUMARSINGH16/OmniDownloader" target="_blank" rel="noopener noreferrer">
                 <Github className="h-4 w-4" />
                 <span>GitHub Repository</span>
               </Link>
             </Button>
             <Button variant="outline" size="sm" className="gap-2 text-xs" asChild>
-              <Link href="https://github.com/omnidownload/issues" target="_blank" rel="noopener noreferrer">
+              <Link href="https://github.com/ADITYAKUMARSINGH16/OmniDownloader" target="_blank" rel="noopener noreferrer">
                 <Heart className="h-4 w-4 text-rose-400" />
                 <span>Contribute</span>
               </Link>
@@ -199,7 +199,7 @@ Pipeline Sequence:
                 </p>
                 <div className="p-4 rounded-xl bg-muted/40 border border-border/40 font-mono text-xs text-foreground">
                   <div className="font-semibold text-primary mb-1">MIT License</div>
-                  <div>Copyright (c) 2024 OmniDownload Contributors.</div>
+                  <div>Copyright (c) 2024-2026 Aditya Kumar Singh.</div>
                   <div className="mt-1 text-muted-foreground">
                     Permission is hereby granted, free of charge, to any person obtaining a copy of this software to deal in the Software without restriction.
                   </div>
@@ -208,14 +208,6 @@ Pipeline Sequence:
             </Card>
           </TabsContent>
         </Tabs>
-
-        {/* Footer */}
-        <div className="pt-6 border-t border-border/40 text-center text-xs text-muted-foreground space-y-1">
-          <p>Built with ❤️ by OmniDownload open-source community</p>
-          <p>
-            Powered by yt-dlp, FFmpeg, FastAPI, and Next.js
-          </p>
-        </div>
       </div>
     </AppShell>
   )

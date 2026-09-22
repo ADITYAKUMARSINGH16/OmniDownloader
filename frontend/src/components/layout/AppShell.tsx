@@ -22,7 +22,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const [mobileOpen, setMobileOpen] = useState(false)
 
   return (
-    <div className="min-h-screen bg-background">
+    <div className="min-h-screen flex flex-col bg-background">
       {/* Header */}
       <header className="sticky top-0 z-50 border-b border-border/50 glass-strong">
         <div className="container mx-auto px-4 h-16 flex items-center justify-between">
@@ -111,9 +111,27 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       </header>
 
       {/* Main Content */}
-      <main className="animate-fade-in">
+      <main className="animate-fade-in flex-1">
         {children}
       </main>
+
+      {/* Global Footer */}
+      <footer className="border-t border-border/40 py-6 text-center text-xs text-muted-foreground space-y-1 mt-auto bg-card/30">
+        <p>
+          Built with <span className="text-rose-500 animate-pulse inline-block">❤️</span> by{" "}
+          <Link
+            href="https://github.com/ADITYAKUMARSINGH16"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-foreground font-semibold hover:text-primary transition-colors underline underline-offset-4 decoration-primary/40 hover:decoration-primary"
+          >
+            Aditya Kumar Singh
+          </Link>
+        </p>
+        <p className="text-[11px] text-muted-foreground/70">
+          Powered by yt-dlp, FFmpeg, FastAPI, and Next.js
+        </p>
+      </footer>
     </div>
   )
 }
