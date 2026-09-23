@@ -179,8 +179,27 @@ async def create_download(req: DownloadRequest, request: Request, response: Resp
             content_type = DBContentType.AUDIO
         elif source == "torrent" or validated_url.lower().startswith("magnet:?") or extra_meta.get("is_torrent"):
             content_type = DBContentType.TORRENT
+        elif req.is_video:
+            content_type = DBContentType.VIDEO
+        elif req.is_audio:
+            content_type = DBContentType.AUDIO
+        elif (req.format and "image" in req.format.lower()) or (req.format_id and any(ext in req.format_id.lower() for ext in [".jpg", ".jpeg", ".png", ".webp", ".gif"])) or (source == "pinterest" and not req.is_video):
+            content_type = DBContentType.IMAGE
         else:
-            content_type = DBContentType.VIDEO if req.is_video else (DBContentType.AUDIO if req.is_audio else DBContentType.UNKNOWN)
+            content_type = DBContentType.UNKNOWN
+
+        ext = None
+        if req.audio_only:
+            ext = req.audio_format or "mp3"
+        elif content_type == DBContentType.IMAGE:
+            ext = "jpg"
+            if req.format_id:
+                for img_ext in ["png", "webp", "gif", "jpeg", "jpg"]:
+                    if f".{img_ext}" in req.format_id.lower():
+                        ext = img_ext
+                        break
+        elif req.is_video:
+            ext = "mp4"
 
         if req.speed_limit_kbps:
             extra_meta["speed_limit_kbps"] = req.speed_limit_kbps
@@ -208,6 +227,7 @@ async def create_download(req: DownloadRequest, request: Request, response: Resp
             thumbnail=req.thumbnail,
             duration=req.duration,
             format=format_label,
+            extension=ext,
             content_type=content_type,
             file_size=req.file_size or 0,
             status=initial_status,

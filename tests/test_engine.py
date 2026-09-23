@@ -79,6 +79,7 @@ class TestDownloadEngine:
             mock_proc = AsyncMock()
             mock_proc.returncode = 0
             mock_proc.stdout.readline = AsyncMock(return_value=b"")
+            mock_proc.stderr.readline = AsyncMock(return_value=b"")
             mock_proc.wait = AsyncMock(return_value=None)
             mock_exec.return_value = mock_proc
 

@@ -133,12 +133,14 @@ class DownloadEngine:
             url = download.url
             format_model = None
             if download.format_id:
-                is_audio = download.content_type == ContentType.AUDIO or (download.extension in ["mp3", "m4a", "wav", "flac", "aac", "opus"])
-                is_video = download.content_type == ContentType.VIDEO or not is_audio
+                is_image = download.content_type == ContentType.IMAGE or (download.extension in ["jpg", "jpeg", "png", "webp", "gif"])
+                is_audio = (download.content_type == ContentType.AUDIO or (download.extension in ["mp3", "m4a", "wav", "flac", "aac", "opus"])) and not is_image
+                is_video = download.content_type == ContentType.VIDEO or (not is_audio and not is_image)
+                default_ext = "jpg" if is_image else ("m4a" if is_audio else "mp4")
                 format_model = FormatModel(
                     format_id=download.format_id,
                     quality=download.format or "default",
-                    extension=download.extension or ("m4a" if is_audio else "mp4"),
+                    extension=download.extension or default_ext,
                     filesize=download.file_size or None,
                     is_video=is_video,
                     is_audio=is_audio,
@@ -155,6 +157,9 @@ class DownloadEngine:
         output_path: Optional[str] = None,
     ) -> None:
         raw_target = output_path if output_path else settings.download_dir
+        if raw_target and (os.path.isfile(raw_target) or any(raw_target.lower().endswith(f".{e}") for e in ["mp4", "mkv", "mp3", "m4a", "webm", "jpg", "png", "jpeg", "webp", "zip", "tar", "gz"])):
+            raw_target = os.path.dirname(raw_target)
+
         try:
             from core.security import sanitize_folder_path
             target_dir = sanitize_folder_path(raw_target)
@@ -219,10 +224,10 @@ class DownloadEngine:
             ):
                 target_download_url = format_model.format_id
 
-            clean_url_path = url.lower().split("?")[0].rstrip("/")
+            clean_url_path = (target_download_url or url).lower().split("?")[0].rstrip("/")
             is_direct_media = (
                 any(clean_url_path.endswith(ext) for ext in [".jpg", ".jpeg", ".png", ".gif", ".webp", ".svg", ".bmp", ".ico", ".pdf", ".zip", ".tar", ".gz", ".rar", ".7z", ".exe", ".dmg", ".apk", ".iso", ".mp4", ".mp3", ".wav", ".m4a"])
-                or ("i.redd.it" in url.lower() or "preview.redd.it" in url.lower())
+                or ("i.redd.it" in url.lower() or "preview.redd.it" in url.lower() or "i.pinimg.com" in (target_download_url or url).lower())
             )
 
             is_torrent = (
@@ -406,6 +411,7 @@ class DownloadEngine:
         last_update_time = time.time()
         last_progress_pct = 5.0
         total_size_bytes = 0
+        stderr_lines = []
 
         async def read_progress():
             nonlocal last_update_time, last_progress_pct, total_size_bytes
@@ -450,15 +456,32 @@ class DownloadEngine:
                         }
                         await _get_ws_manager().send_progress(download_id, msg)
 
+        async def read_stderr():
+            if not process.stderr:
+                return
+            while True:
+                try:
+                    line = await process.stderr.readline()
+                    if not line:
+                        break
+                    # If mocked in unit tests without explicit bytes return value
+                    if not isinstance(line, (bytes, str)):
+                        break
+                    decoded = line.decode("utf-8", errors="ignore") if isinstance(line, bytes) else str(line)
+                    stderr_lines.append(decoded)
+                    if len(stderr_lines) > 50:
+                        stderr_lines.pop(0)
+                except Exception:
+                    break
+
         try:
-            await asyncio.gather(read_progress(), process.wait())
+            await asyncio.gather(read_progress(), read_stderr(), process.wait())
         except asyncio.CancelledError:
             process.kill()
             raise
 
         if process.returncode != 0:
-            stderr_out = await process.stderr.read()
-            err_text = stderr_out.decode("utf-8", errors="ignore")
+            err_text = "".join(stderr_lines).strip()
             logger.error(f"FFmpeg HLS capture failed with code {process.returncode}: {err_text}")
             raise Exception(f"FFmpeg stream assembly failed: {err_text[-300:] if err_text else 'Unknown error'}")
 

@@ -6,7 +6,9 @@ from extractors.twitter import TwitterExtractor
 from extractors.instagram import InstagramExtractor
 from extractors.facebook import FacebookExtractor
 from extractors.terabox import TeraboxExtractor
+from extractors.pinterest import PinterestExtractor
 from extractors.generic import GenericExtractor
+from core.exceptions import ExtractionError
 
 
 class TestExtractorRegistry:
@@ -19,6 +21,7 @@ class TestExtractorRegistry:
         ExtractorRegistry.register(InstagramExtractor())
         ExtractorRegistry.register(FacebookExtractor())
         ExtractorRegistry.register(TeraboxExtractor())
+        ExtractorRegistry.register(PinterestExtractor())
         ExtractorRegistry.register(GenericExtractor())
     
     @classmethod
@@ -137,6 +140,25 @@ class TestExtractorRegistry:
             assert extractor is not None
             assert extractor.name == "terabox"
     
+    def test_pinterest_url_detection(self):
+        urls = [
+            "https://www.pinterest.com/pin/123456789/",
+            "https://in.pinterest.com/pin/123456789/",
+            "https://pin.it/abc1234",
+        ]
+        for url in urls:
+            extractor = ExtractorRegistry.get_extractor(url)
+            assert extractor is not None
+            assert extractor.name == "pinterest"
+
+    @pytest.mark.asyncio
+    async def test_pinterest_homepage_error(self):
+        extractor = ExtractorRegistry.get_extractor("https://in.pinterest.com/")
+        assert extractor is not None
+        assert extractor.name == "pinterest"
+        with pytest.raises(ExtractionError, match="rather than the Pinterest homepage"):
+            await extractor._extract_info("https://in.pinterest.com/")
+
     def test_generic_fallback_for_unknown(self):
         url = "https://unknown-site.com/file.mp4"
         extractor = ExtractorRegistry.get_extractor(url)
