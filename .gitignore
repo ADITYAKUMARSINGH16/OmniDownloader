@@ -64,6 +64,13 @@ backend/data/*.db
 data/*.sqlite*
 backend/data/*.sqlite*
 
+# Authentication & Session Cookies
+*cookies.txt
+*.cookies
+cookies/
+data/cookies.txt
+backend/data/cookies.txt
+
 # Media Downloads & Temporary Files
 downloads/*
 !downloads/.gitkeep
