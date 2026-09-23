@@ -171,12 +171,14 @@ async def create_download(req: DownloadRequest, request: Request, response: Resp
         download_id = uuid.uuid4().hex[:12]
         now = datetime.now(timezone.utc).replace(tzinfo=None)
 
-        extra_meta = {}
+        extra_meta = dict(req.metadata) if req.metadata else {}
         if req.audio_only:
             extra_meta["audio_only"] = True
             extra_meta["audio_format"] = req.audio_format or "mp3"
             extra_meta["audio_bitrate"] = req.audio_bitrate or "320k"
             content_type = DBContentType.AUDIO
+        elif source == "torrent" or validated_url.lower().startswith("magnet:?") or extra_meta.get("is_torrent"):
+            content_type = DBContentType.TORRENT
         else:
             content_type = DBContentType.VIDEO if req.is_video else (DBContentType.AUDIO if req.is_audio else DBContentType.UNKNOWN)
 
@@ -738,6 +740,14 @@ async def get_settings(db: AsyncSession = Depends(get_db)):
         api_key=db_dict.get("api_key"),
         require_api_key=db_dict.get("require_api_key", False),
         rate_limit_per_minute=db_dict.get("rate_limit_per_minute", 60),
+        enable_segmented_download=db_dict.get("enable_segmented_download", True),
+        segmented_connections=db_dict.get("segmented_connections", 8),
+        aria2_enabled=db_dict.get("aria2_enabled", True),
+        aria2_path=db_dict.get("aria2_path"),
+        aria2_rpc_url=db_dict.get("aria2_rpc_url", "http://127.0.0.1:6800/jsonrpc"),
+        aria2_rpc_secret=db_dict.get("aria2_rpc_secret"),
+        auto_tag_audio=db_dict.get("auto_tag_audio", True),
+        embed_album_art=db_dict.get("embed_album_art", True),
     )
 
 
@@ -953,4 +963,58 @@ async def open_folder(req: OpenFolderRequest, db: AsyncSession = Depends(get_db)
 async def open_download_folder(download_id: str, db: AsyncSession = Depends(get_db)):
     """Reveal a specific download in the OS file explorer."""
     return await open_folder(OpenFolderRequest(download_id=download_id), db)
+
+
+@router.get("/system/aria2-status", tags=["System"])
+async def get_aria2_status():
+    """Returns detected status, path, and version of aria2 engine."""
+    from services.aria2 import aria2_service
+    return await aria2_service.get_system_status()
+
+
+@router.post("/torrent/upload", response_model=AnalyzeResponse, tags=["Downloads"])
+async def upload_torrent_file(
+    file: UploadFile = File(...),
+    api_key: Optional[str] = Depends(verify_api_key),
+):
+    """Upload a .torrent file to analyze and extract metadata."""
+    if not file.filename or not file.filename.lower().endswith(".torrent"):
+        raise HTTPException(status_code=400, detail="Only .torrent files are supported.")
+
+    content = await file.read()
+    if len(content) > 10 * 1024 * 1024:
+        raise HTTPException(status_code=400, detail="Torrent file exceeds 10MB limit.")
+
+    import base64
+    b64_content = base64.b64encode(content).decode("utf-8")
+    title = file.filename[:-8] if file.filename.lower().endswith(".torrent") else file.filename
+    clean_title = sanitize_filename(title)
+
+    formats = [
+        FormatModel(
+            format_id="torrent_file",
+            quality="BitTorrent P2P",
+            extension="bin",
+            filesize=len(content),
+            protocol="bittorrent",
+            is_video=False,
+            is_audio=False,
+        )
+    ]
+
+    return AnalyzeResponse(
+        success=True,
+        source="torrent",
+        type=ContentType.TORRENT,
+        title=clean_title,
+        thumbnail=None,
+        duration=None,
+        formats=formats,
+        metadata={
+            "torrent_bytes": b64_content,
+            "filename": file.filename,
+            "is_torrent": True,
+        },
+    )
+
 

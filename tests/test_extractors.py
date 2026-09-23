@@ -21,6 +21,13 @@ class TestExtractorRegistry:
         ExtractorRegistry.register(TeraboxExtractor())
         ExtractorRegistry.register(GenericExtractor())
     
+    @classmethod
+    def teardown_class(cls):
+        import extractors
+        from extractors.torrent import TorrentExtractor
+        if not any(e.name == "torrent" for e in ExtractorRegistry.get_all_extractors()):
+            ExtractorRegistry.register(TorrentExtractor())
+    
     def test_youtube_extractor_registered(self):
         extractors = ExtractorRegistry.get_all_extractors()
         names = [e.name for e in extractors]

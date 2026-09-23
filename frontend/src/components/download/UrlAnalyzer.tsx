@@ -1,7 +1,7 @@
 "use client"
 
-import { useState, useMemo, useEffect } from "react"
-import { Download, Loader2, Search, X, Video, Music, Image, FileText, Archive, AlertCircle, Clock, Check, Sparkles, Link2, CheckCircle2, XCircle, ArrowRight, Headphones, ClipboardPaste, CalendarClock, Play, ExternalLink, Eye, EyeOff, Layers, Zap } from "lucide-react"
+import { useState, useMemo, useEffect, useRef } from "react"
+import { Download, Loader2, Search, X, Video, Music, Image, FileText, Archive, AlertCircle, Clock, Check, Sparkles, Link2, CheckCircle2, XCircle, ArrowRight, Headphones, ClipboardPaste, CalendarClock, Play, ExternalLink, Eye, EyeOff, Layers, Zap, Magnet } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Separator } from "@/components/ui/separator"
@@ -17,6 +17,7 @@ const typeIcons: Record<ContentType, typeof Video> = {
   image: Image,
   document: FileText,
   archive: Archive,
+  torrent: Magnet,
   unknown: FileText,
 }
 
@@ -46,6 +47,7 @@ export function UrlAnalyzer() {
   // Drag-and-drop & clipboard state
   const [isDragging, setIsDragging] = useState(false)
   const [detectedClipboardUrl, setDetectedClipboardUrl] = useState<string | null>(null)
+  const fileInputRef = useRef<HTMLInputElement>(null)
 
   const { setAnalyzing, setAnalyzeError } = useDownloadStore()
   const router = useRouter()
@@ -55,8 +57,37 @@ export function UrlAnalyzer() {
     return inputText
       .split(/[\n\r]+/)
       .map((line) => line.trim())
-      .filter((line) => line.length > 0 && (line.startsWith("http://") || line.startsWith("https://")))
+      .filter((line) => line.length > 0 && (line.startsWith("http://") || line.startsWith("https://") || line.startsWith("magnet:?")))
   }, [inputText])
+
+  const handleTorrentUpload = async (file: File) => {
+    setIsAnalyzing(true)
+    setAnalyzing(true)
+    setError(null)
+    setAnalyzeError(null)
+    setAnalysis(null)
+    setSelectedFormat(null)
+    setBatchResults(null)
+    setInputText(file.name)
+
+    try {
+      const result = await api.uploadTorrentFile(file)
+      if (result.error) {
+        throw new Error(result.error.message)
+      }
+      setAnalysis(result)
+      if (result.formats.length > 0) {
+        setSelectedFormat(result.formats[0])
+      }
+    } catch (e: any) {
+      const errorMsg = getErrorMessage(e, "Failed to analyze .torrent file")
+      setError(errorMsg)
+      setAnalyzeError(errorMsg)
+    } finally {
+      setIsAnalyzing(false)
+      setAnalyzing(false)
+    }
+  }
 
   const isBatchMode = parsedUrls.length > 1
   const singleUrl = parsedUrls.length === 1 ? parsedUrls[0] : inputText.trim()
@@ -212,6 +243,7 @@ export function UrlAnalyzer() {
         is_video: selectedFormat.is_video,
         is_audio: selectedFormat.is_audio,
         scheduled_at: scheduledAt,
+        metadata: analysis.metadata,
       })
       router.push(`/queue?id=${response.id}`)
     } catch (e: any) {
@@ -323,11 +355,24 @@ export function UrlAnalyzer() {
   const handleDrop = (e: React.DragEvent) => {
     e.preventDefault()
     setIsDragging(false)
+
+    // Check for dropped .torrent file
+    if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+      const file = e.dataTransfer.files[0]
+      if (file.name.toLowerCase().endsWith(".torrent")) {
+        handleTorrentUpload(file)
+        return
+      }
+    }
+
     const text = e.dataTransfer.getData("text/plain") || e.dataTransfer.getData("text/uri-list")
     if (text) {
       const trimmed = text.trim()
       setInputText(trimmed)
-      if (!trimmed.includes("\n") && (trimmed.startsWith("http://") || trimmed.startsWith("https://"))) {
+      if (
+        !trimmed.includes("\n") &&
+        (trimmed.startsWith("http://") || trimmed.startsWith("https://") || trimmed.startsWith("magnet:?"))
+      ) {
         executeAnalyze(trimmed)
       }
     }
@@ -467,6 +512,30 @@ export function UrlAnalyzer() {
                   {/* Single URL Actions */}
                   {!isBatchMode && (
                     <>
+                      <input
+                        ref={fileInputRef}
+                        type="file"
+                        accept=".torrent"
+                        className="hidden"
+                        onChange={(e) => {
+                          if (e.target.files && e.target.files[0]) {
+                            handleTorrentUpload(e.target.files[0])
+                          }
+                        }}
+                      />
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => fileInputRef.current?.click()}
+                        disabled={isAnalyzing || isDownloadingSingle}
+                        className="rounded-xl h-9 text-xs px-2.5 text-muted-foreground hover:text-foreground hover:bg-accent/50 gap-1.5 font-medium border border-border/40"
+                        title="Upload a .torrent file"
+                      >
+                        <Magnet className="h-3.5 w-3.5 text-amber-500" />
+                        <span className="hidden sm:inline">Torrent</span>
+                      </Button>
+
                       <Button
                         type="button"
                         variant="outline"
@@ -645,6 +714,17 @@ export function UrlAnalyzer() {
                             {analysis.source}
                           </span>
                         )}
+                        {analysis.source === "torrent" || analysis.type === "torrent" ? (
+                          <span className="flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-500 border border-amber-500/20 text-xs font-medium">
+                            <Magnet className="h-3 w-3" />
+                            P2P BitTorrent
+                          </span>
+                        ) : analysis.source === "generic" ? (
+                          <span className="flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-500 border border-emerald-500/20 text-xs font-medium">
+                            <Zap className="h-3 w-3 fill-emerald-500/20" />
+                            Turbo 8x
+                          </span>
+                        ) : null}
                         {analysis.duration && !analysis.thumbnail && (
                           <span className="flex items-center gap-1 text-sm text-muted-foreground">
                             <Clock className="h-3.5 w-3.5" />

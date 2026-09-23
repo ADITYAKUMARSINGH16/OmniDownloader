@@ -10,6 +10,7 @@ from extractors.pinterest import PinterestExtractor
 from extractors.vimeo import VimeoExtractor
 from extractors.hls import HlsExtractor
 from extractors.terabox import TeraboxExtractor
+from extractors.torrent import TorrentExtractor
 from extractors.generic import GenericExtractor
 
 __all__ = [
@@ -27,6 +28,7 @@ __all__ = [
     "PinterestExtractor",
     "VimeoExtractor",
     "HlsExtractor",
+    "TorrentExtractor",
     "GenericExtractor",
     "TeraboxExtractor",
 ]

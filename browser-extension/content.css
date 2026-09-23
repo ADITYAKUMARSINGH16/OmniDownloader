@@ -1,0 +1,207 @@
+/* OmniDownloader Floating Video Badge & Stream Sniffer Overlay */
+
+.omnidownload-video-wrapper {
+  position: relative !important;
+}
+
+.omnidownload-floating-badge {
+  position: absolute;
+  top: 14px;
+  right: 14px;
+  z-index: 2147483640;
+  display: flex;
+  align-items: center;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  user-select: none;
+  opacity: 0;
+  transform: translateY(-4px) scale(0.96);
+  transition: opacity 0.25s cubic-bezier(0.16, 1, 0.3, 1), transform 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+  pointer-events: none;
+}
+
+.omnidownload-floating-badge.omnidownload-visible {
+  opacity: 1;
+  transform: translateY(0) scale(1);
+  pointer-events: auto;
+}
+
+.omnidownload-btn-group {
+  display: inline-flex;
+  align-items: center;
+  background: linear-gradient(135deg, rgba(30, 27, 75, 0.94), rgba(49, 46, 129, 0.94));
+  border: 1px solid rgba(129, 140, 248, 0.45);
+  border-radius: 9999px;
+  padding: 3px 4px 3px 10px;
+  box-shadow: 0 4px 18px rgba(0, 0, 0, 0.45), 0 0 10px rgba(99, 102, 241, 0.35);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+}
+
+.omnidownload-main-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  background: transparent;
+  color: #f8fafc;
+  border: none;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  padding: 4px 6px 4px 2px;
+  cursor: pointer;
+  outline: none;
+  white-space: nowrap;
+}
+
+.omnidownload-main-btn:hover {
+  color: #ffffff;
+}
+
+.omnidownload-logo-icon {
+  width: 16px;
+  height: 16px;
+  fill: none;
+  stroke: #818cf8;
+  stroke-width: 2.2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.omnidownload-stream-tag {
+  background: rgba(129, 140, 248, 0.25);
+  color: #c7d2fe;
+  border: 1px solid rgba(165, 180, 252, 0.3);
+  font-size: 10px;
+  font-weight: 700;
+  padding: 1px 6px;
+  border-radius: 9999px;
+  text-transform: uppercase;
+  margin-left: 2px;
+}
+
+.omnidownload-dropdown-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  background: rgba(255, 255, 255, 0.1);
+  border: none;
+  border-radius: 50%;
+  color: #cbd5e1;
+  cursor: pointer;
+  margin-left: 4px;
+  outline: none;
+  transition: background 0.15s ease, transform 0.15s ease;
+}
+
+.omnidownload-dropdown-toggle:hover {
+  background: rgba(255, 255, 255, 0.2);
+  color: #ffffff;
+}
+
+.omnidownload-chevron {
+  width: 12px;
+  height: 12px;
+  transition: transform 0.2s ease;
+}
+
+.omnidownload-dropdown-toggle.omnidownload-open .omnidownload-chevron {
+  transform: rotate(180deg);
+}
+
+/* Floating Dropdown Menu */
+.omnidownload-menu {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  min-width: 240px;
+  max-width: 320px;
+  background: rgba(15, 23, 42, 0.96);
+  border: 1px solid rgba(129, 140, 248, 0.35);
+  border-radius: 12px;
+  padding: 6px;
+  box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.6), 0 0 15px rgba(79, 70, 229, 0.25);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  display: none;
+  flex-direction: column;
+  gap: 3px;
+  z-index: 2147483647;
+}
+
+.omnidownload-menu.omnidownload-show {
+  display: flex;
+}
+
+.omnidownload-menu-header {
+  padding: 6px 8px 4px;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: #94a3b8;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  margin-bottom: 4px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.omnidownload-menu-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 7px 10px;
+  border-radius: 8px;
+  background: transparent;
+  color: #e2e8f0;
+  font-size: 12px;
+  text-decoration: none;
+  cursor: pointer;
+  border: none;
+  width: 100%;
+  text-align: left;
+  outline: none;
+  transition: background 0.15s ease;
+}
+
+.omnidownload-menu-item:hover {
+  background: rgba(79, 70, 229, 0.35);
+  color: #ffffff;
+}
+
+.omnidownload-menu-badge {
+  font-size: 9px;
+  font-weight: 700;
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: rgba(99, 102, 241, 0.3);
+  color: #a5b4fc;
+}
+
+.omnidownload-menu-badge.hls {
+  background: rgba(168, 85, 247, 0.3);
+  color: #d8b4fe;
+}
+
+.omnidownload-menu-badge.dash {
+  background: rgba(59, 130, 246, 0.3);
+  color: #93c5fd;
+}
+
+/* Success State */
+.omnidownload-btn-group.omnidownload-success {
+  background: linear-gradient(135deg, rgba(6, 78, 59, 0.95), rgba(16, 185, 129, 0.95));
+  border-color: rgba(52, 211, 153, 0.6);
+  box-shadow: 0 0 15px rgba(16, 185, 129, 0.4);
+}
+
+.omnidownload-btn-group.omnidownload-success .omnidownload-main-btn {
+  color: #ecfdf5;
+}
+
+.omnidownload-btn-group.omnidownload-success .omnidownload-logo-icon {
+  stroke: #a7f3d0;
+}

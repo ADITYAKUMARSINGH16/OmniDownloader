@@ -72,3 +72,40 @@ class TestDownloadEngine:
             
             mock_task.cancel.assert_called_once()
             assert "test_id" not in self.engine.active_downloads
+
+    @pytest.mark.asyncio
+    async def test_download_hls_includes_custom_headers(self, tmp_path):
+        with patch("asyncio.create_subprocess_exec", new_callable=AsyncMock) as mock_exec:
+            mock_proc = AsyncMock()
+            mock_proc.returncode = 0
+            mock_proc.stdout.readline = AsyncMock(return_value=b"")
+            mock_proc.wait = AsyncMock(return_value=None)
+            mock_exec.return_value = mock_proc
+
+            extra_meta = {
+                "headers": {
+                    "Referer": "https://stream.example.com/",
+                    "User-Agent": "StreamSniffer/1.0",
+                }
+            }
+
+            with patch("download.engine.AsyncSessionLocal") as mock_session:
+                mock_db = AsyncMock()
+                mock_result = MagicMock()
+                mock_result.scalar_one_or_none.return_value = None
+                mock_db.execute.return_value = mock_result
+                mock_session.return_value.__aenter__.return_value = mock_db
+
+                await self.engine._download_hls(
+                    "hls_test_id",
+                    "https://stream.example.com/playlist.m3u8",
+                    str(tmp_path),
+                    extra_meta=extra_meta,
+                )
+
+                mock_exec.assert_called_once()
+                cmd = mock_exec.call_args[0]
+                assert "-headers" in cmd
+                headers_idx = cmd.index("-headers")
+                assert "Referer: https://stream.example.com/\r\n" in cmd[headers_idx + 1]
+                assert "User-Agent: StreamSniffer/1.0\r\n" in cmd[headers_idx + 1]

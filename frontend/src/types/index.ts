@@ -1,4 +1,4 @@
-export type ContentType = "video" | "audio" | "image" | "document" | "archive" | "unknown"
+export type ContentType = "video" | "audio" | "image" | "document" | "archive" | "torrent" | "unknown"
 
 export type DownloadStatus = "queued" | "downloading" | "paused" | "completed" | "failed" | "cancelled" | "scheduled"
 
@@ -82,6 +82,7 @@ export interface DownloadRequest {
   audio_bitrate?: string
   speed_limit_kbps?: number
   scheduled_at?: string
+  metadata?: Record<string, any>
 }
 
 export interface DownloadResponse {
@@ -143,6 +144,22 @@ export interface Settings {
   api_key?: string
   require_api_key?: boolean
   rate_limit_per_minute?: number
+  enable_segmented_download?: boolean
+  segmented_connections?: number
+  aria2_enabled?: boolean
+  aria2_path?: string
+  aria2_rpc_url?: string
+  aria2_rpc_secret?: string
+  auto_tag_audio?: boolean
+  embed_album_art?: boolean
+}
+
+export interface Aria2Status {
+  installed: boolean
+  binary_path?: string
+  version?: string
+  rpc_online: boolean
+  rpc_url: string
 }
 
 export interface ApiKeyResponse {

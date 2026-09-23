@@ -27,6 +27,7 @@ class ContentType(str, enum.Enum):
     IMAGE = "image"
     DOCUMENT = "document"
     ARCHIVE = "archive"
+    TORRENT = "torrent"
     UNKNOWN = "unknown"
 
 

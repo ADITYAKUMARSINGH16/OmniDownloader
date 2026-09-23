@@ -174,8 +174,13 @@ class ExtractorRegistry:
     
     @classmethod
     def get_extractor(cls, url: str) -> Optional[BaseExtractor]:
-        parsed = HttpUrl(url)
-        domain = parsed.host.lower() if parsed.host else ""
+        domain = ""
+        try:
+            from urllib.parse import urlparse
+            parsed = urlparse(url)
+            domain = parsed.hostname.lower() if parsed.hostname else ""
+        except Exception:
+            domain = ""
         
         # 1. Match specific extractors (excluding generic)
         for extractor in cls._extractors:

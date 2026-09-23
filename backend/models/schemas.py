@@ -10,6 +10,7 @@ class ContentType(str, Enum):
     IMAGE = "image"
     DOCUMENT = "document"
     ARCHIVE = "archive"
+    TORRENT = "torrent"
     UNKNOWN = "unknown"
 
 
@@ -41,12 +42,12 @@ class FormatModel(BaseModel):
 
 
 class AnalyzeRequest(BaseModel):
-    url: HttpUrl
+    url: str
     
     @field_validator("url", mode="before")
     @classmethod
     def validate_url(cls, v):
-        return str(v)
+        return str(v).strip()
 
 
 class AnalyzeResponse(BaseModel):
@@ -66,7 +67,7 @@ class ErrorResponse(BaseModel):
 
 
 class DownloadRequest(BaseModel):
-    url: HttpUrl
+    url: str
     format_id: Optional[str] = None
     output_path: Optional[str] = None
     priority: int = 0
@@ -82,11 +83,12 @@ class DownloadRequest(BaseModel):
     audio_bitrate: Optional[str] = "320k"
     speed_limit_kbps: Optional[int] = None
     scheduled_at: Optional[datetime] = None
+    metadata: Optional[dict[str, Any]] = None
     
     @field_validator("url", mode="before")
     @classmethod
     def validate_url(cls, v):
-        return str(v)
+        return str(v).strip()
 
 
 class DownloadResponse(BaseModel):
@@ -260,6 +262,14 @@ class SettingsModel(BaseModel):
     api_key: Optional[str] = None
     require_api_key: bool = False
     rate_limit_per_minute: int = 60
+    enable_segmented_download: bool = True
+    segmented_connections: int = 8
+    aria2_enabled: bool = True
+    aria2_path: Optional[str] = None
+    aria2_rpc_url: Optional[str] = "http://127.0.0.1:6800/jsonrpc"
+    aria2_rpc_secret: Optional[str] = None
+    auto_tag_audio: bool = True
+    embed_album_art: bool = True
 
 
 class SettingsUpdate(BaseModel):
@@ -276,3 +286,11 @@ class SettingsUpdate(BaseModel):
     api_key: Optional[str] = None
     require_api_key: Optional[bool] = None
     rate_limit_per_minute: Optional[int] = None
+    enable_segmented_download: Optional[bool] = None
+    segmented_connections: Optional[int] = None
+    aria2_enabled: Optional[bool] = None
+    aria2_path: Optional[str] = None
+    aria2_rpc_url: Optional[str] = None
+    aria2_rpc_secret: Optional[str] = None
+    auto_tag_audio: Optional[bool] = None
+    embed_album_art: Optional[bool] = None

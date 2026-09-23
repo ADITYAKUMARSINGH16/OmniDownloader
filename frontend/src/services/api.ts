@@ -14,7 +14,8 @@ import type {
   Extractor,
   ProgressUpdate,
   CookieStatus,
-  AnalyticsStats
+  AnalyticsStats,
+  Aria2Status
 } from "@/types"
 
 
@@ -59,6 +60,20 @@ class ApiService {
 
   async analyzeUrl(url: string): Promise<AnalyzeResponse> {
     const response = await this.client.post<AnalyzeResponse>("/analyze", { url })
+    return response.data
+  }
+
+  async uploadTorrentFile(file: File): Promise<AnalyzeResponse> {
+    const formData = new FormData()
+    formData.append("file", file)
+    const response = await this.client.post<AnalyzeResponse>("/torrent/upload", formData, {
+      headers: { "Content-Type": "multipart/form-data" },
+    })
+    return response.data
+  }
+
+  async getAria2Status(): Promise<Aria2Status> {
+    const response = await this.client.get<Aria2Status>("/system/aria2-status")
     return response.data
   }
 

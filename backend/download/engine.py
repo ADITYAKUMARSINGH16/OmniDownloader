@@ -225,14 +225,26 @@ class DownloadEngine:
                 or ("i.redd.it" in url.lower() or "preview.redd.it" in url.lower())
             )
 
-            if is_hls or (target_download_url and ".m3u8" in target_download_url.lower().split("?")[0]):
+            is_torrent = (
+                url.lower().startswith("magnet:?")
+                or (extractor is not None and extractor.name == "torrent")
+                or bool(extra_meta.get("is_torrent"))
+                or bool(extra_meta.get("torrent_bytes"))
+                or url.lower().split("?")[0].endswith(".torrent")
+            )
+
+            if is_torrent:
+                await self._download_torrent(
+                    download_id, url, target_dir, extra_meta=extra_meta
+                )
+            elif is_hls or (target_download_url and ".m3u8" in target_download_url.lower().split("?")[0]):
                 dl_url = target_download_url or url
                 await self._download_hls(
                     download_id, dl_url, target_dir, format_model=format_model, extra_meta=extra_meta
                 )
             elif is_generic or target_download_url or is_direct_media:
                 dl_url = target_download_url or url
-                await self._download_generic(download_id, dl_url, target_dir, speed_limit_kbps=speed_limit_kbps)
+                await self._download_generic(download_id, dl_url, target_dir, speed_limit_kbps=speed_limit_kbps, extra_meta=extra_meta)
             else:
                 await self._download_ytdlp(
                     download_id,
@@ -362,8 +374,16 @@ class DownloadEngine:
             "-reconnect", "1",
             "-reconnect_streamed", "1",
             "-reconnect_delay_max", "5",
-            "-i", stream_url,
         ]
+
+        # Attach custom headers (User-Agent, Referer) from browser stream sniffer
+        extra_headers = (extra_meta and (extra_meta.get("headers") or extra_meta.get("http_headers"))) or {}
+        if extra_headers:
+            header_str = "".join(f"{k}: {v}\r\n" for k, v in extra_headers.items() if v)
+            if header_str:
+                cmd.extend(["-headers", header_str])
+
+        cmd.extend(["-i", stream_url])
 
         if is_audio_only:
             if audio_fmt == "mp3":
@@ -443,6 +463,40 @@ class DownloadEngine:
             raise Exception(f"FFmpeg stream assembly failed: {err_text[-300:] if err_text else 'Unknown error'}")
 
         actual_size = os.path.getsize(final_path) if os.path.exists(final_path) else total_size_bytes
+
+        if is_audio_only and final_path and os.path.isfile(final_path):
+            try:
+                auto_tag = True
+                embed_art = True
+                from models.database import Settings as DBSettings
+                async with AsyncSessionLocal() as session:
+                    tag_res = await session.execute(
+                        select(DBSettings).where(DBSettings.key == "auto_tag_audio")
+                    )
+                    t_row = tag_res.scalar_one_or_none()
+                    if t_row and t_row.value:
+                        auto_tag = json.loads(t_row.value)
+
+                    art_res = await session.execute(
+                        select(DBSettings).where(DBSettings.key == "embed_album_art")
+                    )
+                    a_row = art_res.scalar_one_or_none()
+                    if a_row and a_row.value:
+                        embed_art = json.loads(a_row.value)
+
+                if auto_tag:
+                    from services.tagger import audio_tagger
+                    await audio_tagger.tag_audio_file(
+                        file_path=final_path,
+                        metadata={"title": dl_title or clean_title},
+                        thumbnail_url=extra_meta.get("thumbnail") if extra_meta else None,
+                        embed_art=embed_art,
+                    )
+                    if os.path.exists(final_path):
+                        actual_size = os.path.getsize(final_path)
+            except Exception as tag_err:
+                logger.debug(f"HLS audio tagging notice: {tag_err}")
+
         async with AsyncSessionLocal() as session:
             stmt = (
                 update(Download)
@@ -455,14 +509,185 @@ class DownloadEngine:
             await session.execute(stmt)
             await session.commit()
 
-    async def _download_generic(
-        self, download_id: str, url: str, target_dir: str, speed_limit_kbps: Optional[int] = None
+    async def _download_torrent(
+        self,
+        download_id: str,
+        url: str,
+        target_dir: str,
+        extra_meta: Optional[Dict[str, Any]] = None,
     ) -> None:
-        headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        from services.aria2 import aria2_service
+        from core.exceptions import ExtractionError
+
+        is_ready = await aria2_service.ensure_daemon(target_dir)
+        if not is_ready:
+            raise ExtractionError(
+                "BitTorrent engine (aria2c) is not detected on your system. "
+                "Please install aria2 via 'winget install aria2.aria2' or 'scoop install aria2' and restart OmniDownloader."
+            )
+
+        torrent_bytes = (extra_meta or {}).get("torrent_bytes")
+        gid = None
+        if torrent_bytes:
+            import base64
+            raw_bytes = base64.b64decode(torrent_bytes)
+            gid = await aria2_service.add_torrent(raw_bytes, target_dir)
+        else:
+            gid = await aria2_service.add_magnet(url, target_dir)
+
+        logger.info(f"Enqueued torrent in aria2: download_id={download_id}, gid={gid}")
+
+        try:
+            while True:
+                await asyncio.sleep(0.5)
+                try:
+                    status_info = await aria2_service.get_status(gid)
+                except Exception as e:
+                    logger.debug(f"Aria2 tellStatus error for {gid}: {e}")
+                    break
+
+                state = status_info.get("status")
+                total = int(status_info.get("totalLength", 0))
+                completed = int(status_info.get("completedLength", 0))
+                download_speed = int(status_info.get("downloadSpeed", 0))
+                num_seeders = int(status_info.get("numSeeders", 0))
+                files = status_info.get("files", [])
+                primary_file = files[0].get("path", "") if files else ""
+                filename = os.path.basename(primary_file) if primary_file else f"{download_id}.torrent_data"
+
+                progress = round((completed / total) * 100, 1) if total > 0 else 0.0
+                eta = (
+                    int((total - completed) / download_speed)
+                    if download_speed > 0 and total > completed
+                    else 0
+                )
+
+                # Broadcast progress
+                progress_msg = {
+                    "type": "progress",
+                    "download_id": download_id,
+                    "status": "downloading" if state == "active" else state,
+                    "progress": progress,
+                    "downloaded": completed,
+                    "total": total,
+                    "speed": download_speed,
+                    "eta": eta,
+                    "seeders": num_seeders,
+                }
+                await _get_ws_manager().send_progress(download_id, progress_msg)
+                await _get_ws_manager().broadcast(progress_msg)
+
+                # Update DB
+                async with AsyncSessionLocal() as session:
+                    stmt = (
+                        update(Download)
+                        .where(Download.id == download_id)
+                        .values(
+                            downloaded_size=completed,
+                            file_size=total,
+                            progress=int(progress),
+                            speed=download_speed,
+                            eta=eta,
+                            filename=filename,
+                            output_path=primary_file or os.path.join(target_dir, filename),
+                        )
+                    )
+                    await session.execute(stmt)
+                    await session.commit()
+
+                cb = self.progress_callbacks.get(download_id)
+                if cb:
+                    if asyncio.iscoroutinefunction(cb):
+                        await cb(progress, completed, total, download_speed, eta)
+                    else:
+                        cb(progress, completed, total, download_speed, eta)
+
+                if state == "complete":
+                    logger.info(f"Torrent completed: {download_id}")
+                    break
+                elif state in ["error", "removed"]:
+                    error_msg = status_info.get("errorMessage", f"Aria2 download ended with status '{state}'")
+                    raise ExtractionError(error_msg)
+        except asyncio.CancelledError:
+            try:
+                await aria2_service.pause(gid)
+            except Exception:
+                pass
+            raise
+
+    async def _download_generic(
+        self,
+        download_id: str,
+        url: str,
+        target_dir: str,
+        speed_limit_kbps: Optional[int] = None,
+        extra_meta: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        custom_headers = (extra_meta and (extra_meta.get("headers") or extra_meta.get("http_headers"))) or {}
+        # Check if segmented turbo download is enabled
+        enable_segmented = True
+        num_connections = 8
+        try:
+            from models.database import Settings as DBSettings
+            async with AsyncSessionLocal() as session:
+                seg_res = await session.execute(
+                    select(DBSettings).where(DBSettings.key == "enable_segmented_download")
+                )
+                seg_row = seg_res.scalar_one_or_none()
+                if seg_row and seg_row.value:
+                    enable_segmented = json.loads(seg_row.value)
+
+                conn_res = await session.execute(
+                    select(DBSettings).where(DBSettings.key == "segmented_connections")
+                )
+                conn_row = conn_res.scalar_one_or_none()
+                if conn_row and conn_row.value:
+                    num_connections = int(json.loads(conn_row.value))
+        except Exception:
+            pass
+
+        req_headers = {
+            "User-Agent": settings.user_agent,
             "Accept": "*/*",
+            **custom_headers,
         }
-        async with httpx.AsyncClient(timeout=settings.request_timeout, follow_redirects=True, headers=headers) as client:
+
+        if enable_segmented:
+            try:
+                from download.segmented import SegmentedDownloader
+                cb = self.progress_callbacks.get(download_id)
+                seg_dl = SegmentedDownloader(connections=num_connections)
+
+                dl_title = None
+                dl_ext = None
+                async with AsyncSessionLocal() as session:
+                    res = await session.execute(select(Download).where(Download.id == download_id))
+                    dl_record = res.scalar_one_or_none()
+                    if dl_record:
+                        dl_title = dl_record.title
+                        dl_ext = dl_record.extension or dl_record.format
+
+                pref_filename = None
+                if dl_title:
+                    clean_title = sanitize_filename(dl_title)[:120]
+                    ext = dl_ext.lstrip(".") if dl_ext else "bin"
+                    pref_filename = f"{clean_title} [{download_id}].{ext}"
+
+                await seg_dl.download(
+                    download_id=download_id,
+                    url=url,
+                    target_dir=target_dir,
+                    filename=pref_filename,
+                    connections=num_connections,
+                    speed_limit_kbps=speed_limit_kbps,
+                    progress_callback=cb,
+                    headers=req_headers,
+                )
+                return
+            except Exception as e:
+                logger.warning(f"Segmented turbo download failed ({e}), falling back to single stream")
+
+        async with httpx.AsyncClient(timeout=settings.request_timeout, follow_redirects=True, headers=req_headers) as client:
             async with client.stream("GET", url) as response:
                 response.raise_for_status()
                 total = int(response.headers.get("content-length", 0))
@@ -701,6 +926,11 @@ class DownloadEngine:
         if speed_limit_kbps and speed_limit_kbps > 0:
             ydl_opts["ratelimit"] = speed_limit_kbps * 1024
 
+        # Custom request headers support (e.g. from stream sniffer)
+        custom_headers = (extra_meta and (extra_meta.get("headers") or extra_meta.get("http_headers"))) or {}
+        if custom_headers:
+            ydl_opts["http_headers"] = custom_headers
+
         def run_ytdlp():
             target_format_id = format_model.format_id if format_model and format_model.format_id else None
             is_audio_requested = audio_only or bool(format_model and format_model.is_audio and not format_model.is_video)
@@ -807,6 +1037,40 @@ class DownloadEngine:
         detected_ext = os.path.splitext(filename)[1].lstrip(".").lower() if filename else None
         is_audio = audio_only or detected_ext in ["mp3", "m4a", "flac", "wav", "aac", "opus"]
         ctype = ContentType.AUDIO if is_audio else ContentType.VIDEO
+
+        # Automatic Audio Tagging & Artwork Embedding
+        if is_audio and filename and os.path.isfile(filename):
+            try:
+                auto_tag = True
+                embed_art = True
+                from models.database import Settings as DBSettings
+                async with AsyncSessionLocal() as session:
+                    tag_res = await session.execute(
+                        select(DBSettings).where(DBSettings.key == "auto_tag_audio")
+                    )
+                    t_row = tag_res.scalar_one_or_none()
+                    if t_row and t_row.value:
+                        auto_tag = json.loads(t_row.value)
+
+                    art_res = await session.execute(
+                        select(DBSettings).where(DBSettings.key == "embed_album_art")
+                    )
+                    a_row = art_res.scalar_one_or_none()
+                    if a_row and a_row.value:
+                        embed_art = json.loads(a_row.value)
+
+                if auto_tag:
+                    from services.tagger import audio_tagger
+                    await audio_tagger.tag_audio_file(
+                        file_path=filename,
+                        metadata=info,
+                        thumbnail_url=info.get("thumbnail"),
+                        embed_art=embed_art,
+                    )
+                    if os.path.exists(filename):
+                        file_size = os.path.getsize(filename)
+            except Exception as tag_err:
+                logger.debug(f"Audio tagging notice: {tag_err}")
 
         async with AsyncSessionLocal() as session:
             stmt = (

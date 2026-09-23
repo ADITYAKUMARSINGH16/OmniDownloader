@@ -100,6 +100,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         // Automatically analyze the active supported page
         autoAnalyzePage(activeTabUrl, tab.title)
       }
+      loadSniffedStreams(tab.id, tab.title)
     }
   } catch (e) {
     console.debug('Could not get active tab:', e)
@@ -214,6 +215,107 @@ document.addEventListener('DOMContentLoaded', async () => {
           syncCookiesBtn.style.color = '#374151'
         }, 3000)
       }
+    })
+  }
+
+  // Load streams captured by network sniffer
+  function loadSniffedStreams(tabId, pageTitle) {
+    const sniffedSection = document.getElementById('sniffedStreamsSection')
+    const streamsCount = document.getElementById('streamsCount')
+    const streamsList = document.getElementById('streamsList')
+    if (!sniffedSection || !streamsList) return
+
+    chrome.runtime.sendMessage({ type: 'GET_TAB_STREAMS', tabId }, (res) => {
+      if (chrome.runtime.lastError || !res || !Array.isArray(res.streams) || res.streams.length === 0) {
+        sniffedSection.style.display = 'none'
+        return
+      }
+
+      const streams = res.streams
+      streamsCount.textContent = String(streams.length)
+      streamsList.innerHTML = ''
+      sniffedSection.style.display = 'block'
+
+      streams.forEach((stream, idx) => {
+        const item = document.createElement('div')
+        item.className = 'media-item'
+        item.style.cssText =
+          'padding: 8px 10px; border: 1px solid #e0e7ff; border-radius: 8px; background: #f5f3ff; display: flex; align-items: center; gap: 8px; margin-bottom: 6px;'
+
+        const shortUrl = stream.url.split('?')[0].split('/').pop() || 'Manifest'
+        const hasReferer = !!stream.headers?.Referer
+
+        item.innerHTML = `
+          <div style="flex: 1; min-width: 0;">
+            <div style="display: flex; align-items: center; gap: 6px;">
+              <span style="font-size: 9px; font-weight: 700; padding: 1px 5px; border-radius: 4px; background: ${
+                stream.type === 'HLS' ? '#9333ea' : '#2563eb'
+              }; color: white;">
+                ${stream.type}
+              </span>
+              <span style="font-weight: 600; font-size: 12px; color: #1e1b4b; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
+                Stream #${idx + 1} (${shortUrl})
+              </span>
+            </div>
+            <div style="font-size: 10px; color: #6b7280; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-top: 2px;">
+              ${stream.url}
+            </div>
+            <div style="font-size: 9px; color: #4338ca; margin-top: 2px;">
+              ✓ Headers attached ${hasReferer ? '(Referer captured)' : ''}
+            </div>
+          </div>
+          <div style="display: flex; gap: 4px; shrink: 0;">
+            <button class="stream-dl-btn" data-type="video" style="padding: 5px 8px; background: #4f46e5; color: white; border: none; border-radius: 5px; font-size: 11px; font-weight: 600; cursor: pointer;">
+              ⬇ Video
+            </button>
+            <button class="stream-dl-btn" data-type="audio" style="padding: 5px 8px; background: #e0e7ff; color: #3730a3; border: 1px solid #c7d2fe; border-radius: 5px; font-size: 11px; font-weight: 600; cursor: pointer;">
+              🎵
+            </button>
+          </div>
+        `
+
+        const videoBtn = item.querySelector('button[data-type="video"]')
+        const audioBtn = item.querySelector('button[data-type="audio"]')
+
+        videoBtn.addEventListener('click', () => {
+          videoBtn.textContent = 'Queuing...'
+          videoBtn.disabled = true
+          chrome.runtime.sendMessage(
+            {
+              type: 'DOWNLOAD_STREAM',
+              url: stream.url,
+              headers: stream.headers,
+              streamType: stream.type,
+              title: pageTitle || 'Web Stream',
+            },
+            (r) => {
+              videoBtn.textContent = '✓ Queued'
+              videoBtn.style.background = '#16a34a'
+            }
+          )
+        })
+
+        audioBtn.addEventListener('click', () => {
+          audioBtn.textContent = '...'
+          audioBtn.disabled = true
+          chrome.runtime.sendMessage(
+            {
+              type: 'DOWNLOAD_STREAM',
+              url: stream.url,
+              headers: stream.headers,
+              streamType: stream.type,
+              isAudioOnly: true,
+              title: pageTitle || 'Web Stream Audio',
+            },
+            (r) => {
+              audioBtn.textContent = '✓'
+              audioBtn.style.background = '#dcfce7'
+            }
+          )
+        })
+
+        streamsList.appendChild(item)
+      })
     })
   }
 

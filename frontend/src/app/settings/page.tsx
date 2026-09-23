@@ -25,6 +25,9 @@ import {
   EyeOff,
   RefreshCw,
   Lock,
+  Zap,
+  Magnet,
+  Music,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
@@ -33,7 +36,7 @@ import { Label } from "@/components/ui/label"
 import { Switch } from "@/components/ui/switch"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs"
-import { Settings as SettingsType, SettingsUpdate, CookieStatus } from "@/types"
+import { Settings as SettingsType, SettingsUpdate, CookieStatus, Aria2Status } from "@/types"
 import { api } from "@/services/api"
 import { cn } from "@/lib/utils"
 import { toast } from "@/hooks/useToast"
@@ -46,6 +49,7 @@ export default function SettingsPage() {
   const [isSaving, setIsSaving] = useState(false)
   const [isOpeningFolder, setIsOpeningFolder] = useState(false)
   const [cookieStatus, setCookieStatus] = useState<CookieStatus | null>(null)
+  const [aria2Status, setAria2Status] = useState<Aria2Status | null>(null)
   const [isUploadingCookies, setIsUploadingCookies] = useState(false)
   const [cookieText, setCookieText] = useState("")
   const [showCookiePaste, setShowCookiePaste] = useState(false)
@@ -57,9 +61,10 @@ export default function SettingsPage() {
   useEffect(() => {
     const loadSettings = async () => {
       try {
-        const [data, cookies] = await Promise.all([
+        const [data, cookies, aria2] = await Promise.all([
           api.getSettings(),
           api.getCookiesStatus().catch(() => null),
+          api.getAria2Status().catch(() => null),
         ])
         if (data.download_dir) {
           data.download_dir = data.download_dir.replace(/^["']+|["']+$/g, "").trim()
@@ -69,6 +74,7 @@ export default function SettingsPage() {
         }
         setSettings(data)
         if (cookies) setCookieStatus(cookies)
+        if (aria2) setAria2Status(aria2)
       } catch (e) {
         console.error("Failed to load settings:", e)
       } finally {
@@ -100,6 +106,14 @@ export default function SettingsPage() {
         api_key: settings.api_key,
         require_api_key: settings.require_api_key,
         rate_limit_per_minute: settings.rate_limit_per_minute,
+        enable_segmented_download: settings.enable_segmented_download,
+        segmented_connections: settings.segmented_connections,
+        aria2_enabled: settings.aria2_enabled,
+        aria2_path: settings.aria2_path,
+        aria2_rpc_url: settings.aria2_rpc_url,
+        aria2_rpc_secret: settings.aria2_rpc_secret,
+        auto_tag_audio: settings.auto_tag_audio,
+        embed_album_art: settings.embed_album_art,
       }
       const saved = await api.updateSettings(update)
       setSettings(saved)
@@ -456,6 +470,114 @@ export default function SettingsPage() {
               </CardContent>
             </Card>
 
+            {/* Turbo Segmented Downloader Card */}
+            <Card className="border-border/40 bg-card/60 shadow-sm backdrop-blur">
+              <CardHeader>
+                <div className="flex items-center justify-between">
+                  <div className="space-y-1">
+                    <CardTitle className="text-lg font-heading flex items-center gap-2">
+                      <Zap className="h-5 w-5 text-amber-500 fill-amber-500/20" />
+                      Turbo Multi-Connection Acceleration (IDM-Style)
+                    </CardTitle>
+                    <CardDescription>
+                      Split large direct HTTP/HTTPS files into parallel byte-range streams for up to 10x faster downloads
+                    </CardDescription>
+                  </div>
+                  <Switch
+                    checked={settings?.enable_segmented_download ?? true}
+                    onCheckedChange={(v) => handleSettingChange("enable_segmented_download", v)}
+                  />
+                </div>
+              </CardHeader>
+              {(settings?.enable_segmented_download ?? true) && (
+                <CardContent className="space-y-4 pt-0">
+                  <div className="space-y-2">
+                    <Label htmlFor="segmented_connections">Parallel Connections per File</Label>
+                    <div className="grid grid-cols-4 gap-2 max-w-md">
+                      {[2, 4, 8, 16].map((num) => {
+                        const isSelected = (settings?.segmented_connections ?? 8) === num
+                        return (
+                          <button
+                            key={num}
+                            type="button"
+                            onClick={() => handleSettingChange("segmented_connections", num)}
+                            className={cn(
+                              "px-3 py-2 rounded-lg text-xs font-semibold border transition-all duration-200 flex flex-col items-center gap-0.5",
+                              isSelected
+                                ? "border-amber-500 bg-amber-500/10 text-amber-500 shadow-sm"
+                                : "border-border/40 bg-background/30 text-muted-foreground hover:bg-background/60"
+                            )}
+                          >
+                            <span className="text-sm font-bold">{num}x</span>
+                            <span className="text-[10px] opacity-75">{num === 8 ? "Recommended" : num === 16 ? "Extreme" : "Standard"}</span>
+                          </button>
+                        )
+                      })}
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      Higher connection counts bypass bandwidth limits on throttled servers by downloading multiple segments simultaneously.
+                    </p>
+                  </div>
+                </CardContent>
+              )}
+            </Card>
+
+            {/* BitTorrent Engine Card */}
+            <Card className="border-border/40 bg-card/60 shadow-sm backdrop-blur">
+              <CardHeader>
+                <div className="flex items-center justify-between">
+                  <div className="space-y-1">
+                    <CardTitle className="text-lg font-heading flex items-center gap-2">
+                      <Magnet className="h-5 w-5 text-orange-500" />
+                      BitTorrent & Magnet Engine (aria2)
+                    </CardTitle>
+                    <CardDescription>
+                      High-performance decentralized P2P engine for magnet links and .torrent archives
+                    </CardDescription>
+                  </div>
+                  {aria2Status?.installed ? (
+                    <span className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-500/10 text-emerald-500 border border-emerald-500/20 text-xs font-medium">
+                      <Check className="h-3.5 w-3.5" />
+                      {aria2Status.version || "Installed"}
+                    </span>
+                  ) : (
+                    <span className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-amber-500/10 text-amber-500 border border-amber-500/20 text-xs font-medium">
+                      Not Installed
+                    </span>
+                  )}
+                </div>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                {aria2Status?.installed ? (
+                  <div className="space-y-3">
+                    <div className="p-3 rounded-xl bg-background/40 border border-border/40 text-xs space-y-1 font-mono">
+                      <div className="flex items-center justify-between text-muted-foreground">
+                        <span>Binary Path:</span>
+                        <span className="text-foreground truncate max-w-[280px] sm:max-w-md">{aria2Status.binary_path}</span>
+                      </div>
+                      <div className="flex items-center justify-between text-muted-foreground">
+                        <span>Daemon Status:</span>
+                        <span className={aria2Status.rpc_online ? "text-emerald-500 font-semibold" : "text-amber-500 font-semibold"}>
+                          {aria2Status.rpc_online ? "Daemon Online (Port 6800)" : "Managed on Demand"}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="p-4 rounded-xl bg-amber-500/5 border border-amber-500/20 text-xs space-y-2.5">
+                    <p className="font-semibold text-foreground">Aria2 is required for BitTorrent & Magnet downloads:</p>
+                    <p className="text-muted-foreground">
+                      Install aria2 with one command in PowerShell or Terminal, then refresh this page:
+                    </p>
+                    <div className="p-2.5 rounded-lg bg-background/80 border border-border/60 font-mono text-[11px] text-primary flex items-center justify-between select-all">
+                      <span>winget install aria2.aria2</span>
+                      <span className="text-muted-foreground text-[10px]">(or: scoop install aria2)</span>
+                    </div>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+
             <Card className="border-border/40 bg-card/60 shadow-sm backdrop-blur">
               <CardHeader>
                 <CardTitle className="text-lg font-heading">Default Quality Target</CardTitle>
@@ -513,6 +635,47 @@ export default function SettingsPage() {
                   <Switch
                     checked={settings?.delete_temp_files ?? true}
                     onCheckedChange={(v) => handleSettingChange("delete_temp_files", v)}
+                  />
+                </div>
+              </CardContent>
+            </Card>
+
+            {/* Audio Tagging & Artwork Card */}
+            <Card className="border-border/40 bg-card/60 shadow-sm backdrop-blur">
+              <CardHeader>
+                <CardTitle className="text-lg font-heading flex items-center gap-2">
+                  <Music className="h-5 w-5 text-pink-500" />
+                  Automated Audio Tagging & Album Artwork
+                </CardTitle>
+                <CardDescription>
+                  Clean track titles, query MusicBrainz for official metadata, and embed high-resolution cover artwork into audio files
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="flex items-center justify-between p-3 rounded-lg bg-background/30 border border-border/20">
+                  <div className="space-y-0.5">
+                    <Label className="text-sm font-medium">Automatic ID3 & Metadata Tagging</Label>
+                    <p className="text-xs text-muted-foreground">
+                      Strip YouTube boilerplate (e.g. &apos;[Official Video]&apos;), parse Artist &amp; Title, and match recordings via MusicBrainz
+                    </p>
+                  </div>
+                  <Switch
+                    checked={settings?.auto_tag_audio ?? true}
+                    onCheckedChange={(v) => handleSettingChange("auto_tag_audio", v)}
+                  />
+                </div>
+
+                <div className="flex items-center justify-between p-3 rounded-lg bg-background/30 border border-border/20">
+                  <div className="space-y-0.5">
+                    <Label className="text-sm font-medium">Embed Cover Artwork</Label>
+                    <p className="text-xs text-muted-foreground">
+                      Embed release cover art or high-res thumbnail directly into MP3 (ID3), M4A (mp4), FLAC, and Opus containers
+                    </p>
+                  </div>
+                  <Switch
+                    checked={settings?.embed_album_art ?? true}
+                    disabled={!(settings?.auto_tag_audio ?? true)}
+                    onCheckedChange={(v) => handleSettingChange("embed_album_art", v)}
                   />
                 </div>
               </CardContent>

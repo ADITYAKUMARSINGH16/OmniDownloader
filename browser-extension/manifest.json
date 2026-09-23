@@ -8,19 +8,11 @@
     "activeTab",
     "scripting",
     "storage",
-    "cookies"
+    "cookies",
+    "webRequest"
   ],
   "host_permissions": [
-    "http://localhost:8000/*",
-    "http://127.0.0.1:8000/*",
-    "*://*.youtube.com/*",
-    "*://*.google.com/*",
-    "*://*.instagram.com/*",
-    "*://*.twitter.com/*",
-    "*://*.x.com/*",
-    "*://*.tiktok.com/*",
-    "*://*.facebook.com/*",
-    "*://*.reddit.com/*"
+    "<all_urls>"
   ],
   "background": {
     "service_worker": "background.js"
@@ -29,6 +21,7 @@
     {
       "matches": ["<all_urls>"],
       "js": ["content.js"],
+      "css": ["content.css"],
       "run_at": "document_idle"
     }
   ],

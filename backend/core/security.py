@@ -20,8 +20,13 @@ BLOCKED_IPS = [
     ipaddress.ip_network("fe80::/10"),
 ]
 
-ALLOWED_SCHEMES = {"http", "https"}
+ALLOWED_SCHEMES = {"http", "https", "magnet"}
 MAX_URL_LENGTH = 2048
+
+MAGNET_PATTERN = re.compile(
+    r"^magnet:\?xt=urn:btih:[a-zA-Z0-9]{32,40}(?:&.*)?$",
+    re.IGNORECASE,
+)
 
 URL_PATTERN = re.compile(
     r"^(?:http|https)://"
@@ -52,9 +57,15 @@ def validate_url(url: str) -> str:
     if not parsed.scheme:
         raise SecurityError("INVALID_URL_FORMAT", "Invalid URL format")
     
-    if parsed.scheme.lower() not in ALLOWED_SCHEMES:
-        raise SecurityError("UNSUPPORTED_SCHEME", f"Scheme '{parsed.scheme}' is not allowed. Only HTTP/HTTPS supported")
+    scheme = parsed.scheme.lower()
+    if scheme not in ALLOWED_SCHEMES:
+        raise SecurityError("UNSUPPORTED_SCHEME", f"Scheme '{parsed.scheme}' is not allowed. Only HTTP/HTTPS/magnet supported")
     
+    if scheme == "magnet":
+        if not MAGNET_PATTERN.match(url):
+            raise SecurityError("INVALID_URL_FORMAT", "Invalid magnet URI format")
+        return url
+
     if not URL_PATTERN.match(url):
         raise SecurityError("INVALID_URL_FORMAT", "Invalid URL format")
     
@@ -114,6 +125,9 @@ def validate_mime_type(mime_type: str, allowed_types: Optional[list[str]] = None
 
 async def check_ssrf(url: str) -> None:
     parsed = urlparse(url)
+    if parsed.scheme.lower() == "magnet":
+        return
+
     hostname = parsed.hostname
     
     if not hostname:

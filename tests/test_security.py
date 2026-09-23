@@ -20,6 +20,15 @@ class TestURLValidation:
     def test_valid_https_url(self):
         url = "https://youtube.com/watch?v=test"
         assert validate_url(url) == url
+
+    def test_valid_magnet_url(self):
+        magnet = "magnet:?xt=urn:btih:d6b63c7b7e87b7a702b8d002f23cf9b2a64c483a&dn=Ubuntu"
+        assert validate_url(magnet) == magnet
+
+    def test_invalid_magnet_url_format(self):
+        with pytest.raises(SecurityError) as exc:
+            validate_url("magnet:?invalid=true")
+        assert exc.value.code == "INVALID_URL_FORMAT"
     
     def test_invalid_url_missing_scheme(self):
         with pytest.raises(SecurityError) as exc:
