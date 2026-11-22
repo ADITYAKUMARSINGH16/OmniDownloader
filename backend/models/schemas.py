@@ -1,0 +1,441 @@
+from pydantic import BaseModel, Field, HttpUrl, field_validator
+from typing import Optional, List, Literal, Any
+from datetime import datetime
+from enum import Enum
+
+
+class ContentType(str, Enum):
+    VIDEO = "video"
+    AUDIO = "audio"
+    IMAGE = "image"
+    DOCUMENT = "document"
+    ARCHIVE = "archive"
+    TORRENT = "torrent"
+    UNKNOWN = "unknown"
+
+
+class DownloadStatus(str, Enum):
+    QUEUED = "queued"
+    SCHEDULED = "scheduled"
+    DOWNLOADING = "downloading"
+    PAUSED = "paused"
+    COMPLETED = "completed"
+    FAILED = "failed"
+    CANCELLED = "cancelled"
+
+
+
+class FormatModel(BaseModel):
+    format_id: str
+    quality: str
+    extension: str
+    filesize: Optional[int] = None
+    vcodec: Optional[str] = None
+    acodec: Optional[str] = None
+    fps: Optional[float] = None
+    width: Optional[int] = None
+    height: Optional[int] = None
+    bitrate: Optional[float] = None
+    protocol: Optional[str] = None
+    is_video: bool = False
+    is_audio: bool = False
+
+    @field_validator("filesize", mode="before")
+    @classmethod
+    def coerce_filesize(cls, v):
+        if v is None:
+            return None
+        if isinstance(v, (int, float)):
+            return int(round(v))
+        try:
+            return int(round(float(v)))
+        except (ValueError, TypeError):
+            return None
+
+
+class AnalyzeRequest(BaseModel):
+    url: str
+    
+    @field_validator("url", mode="before")
+    @classmethod
+    def validate_url(cls, v):
+        return str(v).strip()
+
+
+class AnalyzeResponse(BaseModel):
+    success: bool = True
+    source: str
+    type: ContentType
+    title: str
+    thumbnail: Optional[str] = None
+    duration: Optional[float] = None
+    formats: List[FormatModel] = []
+    subtitles: List[str] = []
+    chapters: Optional[List[dict[str, Any]]] = None
+    metadata: Optional[dict[str, Any]] = None
+
+
+class PlaylistEntryModel(BaseModel):
+    id: str
+    url: str
+    title: str
+    duration: Optional[float] = None
+    thumbnail: Optional[str] = None
+    index: Optional[int] = None
+
+
+class PlaylistAnalyzeResponse(BaseModel):
+    success: bool = True
+    id: str
+    title: str
+    uploader: Optional[str] = None
+    entry_count: int = 0
+    entries: List[PlaylistEntryModel] = []
+
+
+class ErrorResponse(BaseModel):
+    success: bool = False
+    error: dict[str, Any]
+
+
+class DownloadRequest(BaseModel):
+    url: str
+    format_id: Optional[str] = None
+    output_path: Optional[str] = None
+    priority: int = 0
+    title: Optional[str] = None
+    thumbnail: Optional[str] = None
+    duration: Optional[float] = None
+    format: Optional[str] = None
+    file_size: Optional[int] = None
+    is_video: Optional[bool] = None
+    is_audio: Optional[bool] = None
+    audio_only: Optional[bool] = False
+    audio_format: Optional[str] = "mp3"
+    audio_bitrate: Optional[str] = "320k"
+    speed_limit_kbps: Optional[int] = None
+    scheduled_at: Optional[datetime] = None
+    metadata: Optional[dict[str, Any]] = None
+    # Clip & Enhancement options
+    start_time: Optional[str] = None
+    end_time: Optional[str] = None
+    subtitle_langs: Optional[List[str]] = None
+    embed_subtitles: Optional[bool] = False
+    embed_chapters: Optional[bool] = False
+    sponsorblock_remove: Optional[bool] = False
+    subfolder: Optional[str] = None
+    
+    @field_validator("url", mode="before")
+    @classmethod
+    def validate_url(cls, v):
+        return str(v).strip()
+
+    @field_validator("file_size", "speed_limit_kbps", mode="before")
+    @classmethod
+    def coerce_int_fields(cls, v):
+        if v is None:
+            return None
+        if isinstance(v, (int, float)):
+            return int(round(v))
+        try:
+            return int(round(float(v)))
+        except (ValueError, TypeError):
+            return None
+
+
+class DownloadResponse(BaseModel):
+    id: str
+    status: DownloadStatus = DownloadStatus.QUEUED
+
+
+class BatchItemModel(BaseModel):
+    url: str
+    title: Optional[str] = None
+    thumbnail: Optional[str] = None
+    duration: Optional[float] = None
+
+
+class BatchDownloadRequest(BaseModel):
+    urls: List[str]
+    items: Optional[List[BatchItemModel]] = None
+    format_id: Optional[str] = None
+    priority: int = 0
+    is_video: Optional[bool] = None
+    is_audio: Optional[bool] = None
+    audio_only: Optional[bool] = False
+    audio_format: Optional[str] = "mp3"
+    audio_bitrate: Optional[str] = "320k"
+    speed_limit_kbps: Optional[int] = None
+    scheduled_at: Optional[datetime] = None
+    subfolder: Optional[str] = None
+    start_time: Optional[str] = None
+    end_time: Optional[str] = None
+    subtitle_langs: Optional[List[str]] = None
+    embed_subtitles: Optional[bool] = False
+    embed_chapters: Optional[bool] = False
+    sponsorblock_remove: Optional[bool] = False
+
+    @field_validator("urls", mode="before")
+    @classmethod
+    def validate_urls(cls, v):
+        if not v or len(v) == 0:
+            raise ValueError("At least one URL is required")
+        if len(v) > 250:
+            raise ValueError("Maximum 250 URLs per batch")
+        return [str(u).strip() for u in v if str(u).strip()]
+
+
+class BatchDownloadResult(BaseModel):
+    url: str
+    id: Optional[str] = None
+    status: Literal["queued", "failed", "scheduled"] = "queued"
+    title: Optional[str] = None
+    error: Optional[str] = None
+
+
+class BatchDownloadResponse(BaseModel):
+    total: int
+    queued: int
+    failed: int
+    results: List[BatchDownloadResult]
+
+
+class CookieStatusResponse(BaseModel):
+    exists: bool
+    size: int = 0
+    line_count: int = 0
+    updated_at: Optional[str] = None
+
+
+class SourceStat(BaseModel):
+    source: str
+    count: int
+    percentage: float
+
+
+class FormatStat(BaseModel):
+    format: str
+    count: int
+
+
+class DailyActivity(BaseModel):
+    date: str
+    count: int
+    bytes: int
+
+    @field_validator("count", "bytes", mode="before")
+    @classmethod
+    def coerce_activity_ints(cls, v):
+        if v is None:
+            return 0
+        if isinstance(v, (int, float)):
+            return int(round(v))
+        try:
+            return int(round(float(v)))
+        except (ValueError, TypeError):
+            return 0
+
+
+class AnalyticsStatsResponse(BaseModel):
+    total_downloads: int
+    completed_downloads: int
+    failed_downloads: int
+    active_downloads: int
+    scheduled_downloads: int = 0
+    total_bytes: int
+    success_rate: float
+    sources: List[SourceStat]
+    formats: List[FormatStat]
+    daily_activity: List[DailyActivity]
+
+    @field_validator(
+        "total_downloads",
+        "completed_downloads",
+        "failed_downloads",
+        "active_downloads",
+        "scheduled_downloads",
+        "total_bytes",
+        mode="before",
+    )
+    @classmethod
+    def coerce_analytics_ints(cls, v):
+        if v is None:
+            return 0
+        if isinstance(v, (int, float)):
+            return int(round(v))
+        try:
+            return int(round(float(v)))
+        except (ValueError, TypeError):
+            return 0
+
+
+
+class DownloadInfo(BaseModel):
+    id: str
+    url: str
+    source: str
+    title: Optional[str] = None
+    filename: Optional[str] = None
+    file_size: int = 0
+    downloaded_size: int = 0
+    format: Optional[str] = None
+    format_id: Optional[str] = None
+    extension: Optional[str] = None
+    content_type: ContentType = ContentType.UNKNOWN
+    status: DownloadStatus
+    progress: float = 0.0
+    speed: int = 0
+    eta: int = 0
+    priority: int = 0
+    retries: int = 0
+    max_retries: int = 3
+    error: Optional[str] = None
+    output_path: Optional[str] = None
+    thumbnail: Optional[str] = None
+    duration: Optional[float] = None
+    metadata: Optional[dict[str, Any]] = None
+    created_at: datetime
+    updated_at: Optional[datetime] = None
+    started_at: Optional[datetime] = None
+    completed_at: Optional[datetime] = None
+    scheduled_at: Optional[datetime] = None
+
+    @field_validator(
+        "file_size",
+        "downloaded_size",
+        "speed",
+        "eta",
+        "priority",
+        "retries",
+        "max_retries",
+        mode="before",
+    )
+    @classmethod
+    def coerce_to_int(cls, v):
+        if v is None:
+            return 0
+        if isinstance(v, (int, float)):
+            return int(round(v))
+        try:
+            return int(round(float(v)))
+        except (ValueError, TypeError):
+            return 0
+
+
+
+class ProgressUpdate(BaseModel):
+    id: str
+    status: DownloadStatus
+    progress: float
+    downloaded: int
+    total: int
+    speed: int
+    eta: int
+
+    @field_validator("downloaded", "total", "speed", "eta", mode="before")
+    @classmethod
+    def coerce_progress_ints(cls, v):
+        if v is None:
+            return 0
+        if isinstance(v, (int, float)):
+            return int(round(v))
+        try:
+            return int(round(float(v)))
+        except (ValueError, TypeError):
+            return 0
+
+
+class QueueStatus(BaseModel):
+    downloads: List[DownloadInfo]
+    active_count: int
+    queued_count: int
+    completed_count: int
+    failed_count: int
+    scheduled_count: int = 0
+    max_concurrent: int
+
+
+class HistoryItem(BaseModel):
+    id: str
+    url: str
+    source: str
+    title: Optional[str] = None
+    filename: Optional[str] = None
+    file_size: int = 0
+    format: Optional[str] = None
+    extension: Optional[str] = None
+    content_type: ContentType = ContentType.UNKNOWN
+    status: DownloadStatus
+    output_path: Optional[str] = None
+    thumbnail: Optional[str] = None
+    duration: Optional[float] = None
+    metadata: Optional[dict[str, Any]] = None
+    error: Optional[str] = None
+    created_at: datetime
+    completed_at: Optional[datetime] = None
+
+    @field_validator("file_size", mode="before")
+    @classmethod
+    def coerce_history_file_size(cls, v):
+        if v is None:
+            return 0
+        if isinstance(v, (int, float)):
+            return int(round(v))
+        try:
+            return int(round(float(v)))
+        except (ValueError, TypeError):
+            return 0
+
+
+class ApiKeyGenerateResponse(BaseModel):
+    api_key: str
+    message: str
+    created_at: Optional[datetime] = None
+
+
+class SettingsModel(BaseModel):
+    download_dir: str
+    max_concurrent_downloads: int
+    max_download_speed: Optional[int] = None
+    retry_count: int
+    preferred_video_format: str
+    preferred_audio_format: str
+    default_quality: str
+    auto_merge_audio_video: bool
+    delete_temp_files: bool
+    theme: Literal["light", "dark", "system"] = "system"
+    api_key: Optional[str] = None
+    require_api_key: bool = False
+    rate_limit_per_minute: int = 60
+    enable_segmented_download: bool = True
+    segmented_connections: int = 8
+    aria2_enabled: bool = True
+    aria2_path: Optional[str] = None
+    aria2_rpc_url: Optional[str] = "http://127.0.0.1:6800/jsonrpc"
+    aria2_rpc_secret: Optional[str] = None
+    auto_tag_audio: bool = True
+    embed_album_art: bool = True
+
+
+class SettingsUpdate(BaseModel):
+    download_dir: Optional[str] = None
+    max_concurrent_downloads: Optional[int] = None
+    max_download_speed: Optional[int] = None
+    retry_count: Optional[int] = None
+    preferred_video_format: Optional[str] = None
+    preferred_audio_format: Optional[str] = None
+    default_quality: Optional[str] = None
+    auto_merge_audio_video: Optional[bool] = None
+    delete_temp_files: Optional[bool] = None
+    theme: Optional[Literal["light", "dark", "system"]] = None
+    api_key: Optional[str] = None
+    require_api_key: Optional[bool] = None
+    rate_limit_per_minute: Optional[int] = None
+    enable_segmented_download: Optional[bool] = None
+    segmented_connections: Optional[int] = None
+    aria2_enabled: Optional[bool] = None
+    aria2_path: Optional[str] = None
+    aria2_rpc_url: Optional[str] = None
+    aria2_rpc_secret: Optional[str] = None
+    auto_tag_audio: Optional[bool] = None
+    embed_album_art: Optional[bool] = None

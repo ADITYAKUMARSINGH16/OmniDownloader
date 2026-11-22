@@ -1,0 +1,498 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=Outfit:wght@400;500;600;700;800;900&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --font-outfit: 'Outfit', 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    --font-inter: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  }
+
+  :root,
+  [data-theme="solaris"],
+  .dark {
+    /* Solaris Carbon Palette (Warm OLED Carbon & Solaris Orange) */
+    --bg-base: 9 9 11;             /* #09090B */
+    --bg-surface: 18 19 22;        /* #121316 */
+    --bg-elevated: 24 26 32;       /* #181A20 */
+    --accent-primary: 255 94 26;   /* #FF5E1A Solaris Orange */
+    --accent-secondary: 255 46 99; /* #FF2E63 Plasma Coral */
+    --accent-velocity: 0 245 160;  /* #00F5A0 Hyper-Mint */
+    --accent-muxing: 251 191 36;   /* #FBBF24 Laser Amber-Gold */
+
+    --background: var(--bg-base);
+    --foreground: 244 244 245;
+    --card: var(--bg-surface);
+    --card-foreground: 244 244 245;
+    --popover: var(--bg-elevated);
+    --popover-foreground: 244 244 245;
+    --primary: var(--accent-primary);
+    --primary-foreground: 255 255 255;
+    --secondary: var(--bg-elevated);
+    --secondary-foreground: 228 228 231;
+    --muted: var(--bg-elevated);
+    --muted-foreground: 161 161 170;
+    --accent: var(--bg-elevated);
+    --accent-foreground: 244 244 245;
+    --destructive: 239 68 68;
+    --destructive-foreground: 255 255 255;
+    --border: 39 39 42;
+    --input: 39 39 42;
+    --ring: var(--accent-primary);
+    --radius: 0.75rem;
+  }
+
+  [data-theme="nordic"] {
+    /* Nordic Slate (Deep Oceanic & Cold Mist) */
+    --bg-base: 6 20 27;            /* #06141B */
+    --bg-surface: 17 33 45;        /* #11212D */
+    --bg-elevated: 37 55 69;       /* #253745 */
+    --accent-primary: 155 168 171; /* #9BA8AB Nordic Mist */
+    --accent-secondary: 204 208 207;/* #CCD0CF Glacial Frost */
+    --accent-velocity: 110 200 215;/* #6EC8D7 Arctic Aqua */
+    --accent-muxing: 251 191 36;   /* #FBBF24 Amber */
+
+    --background: var(--bg-base);
+    --foreground: 204 208 207;     /* #CCD0CF */
+    --card: var(--bg-surface);
+    --card-foreground: 204 208 207;
+    --popover: var(--bg-elevated);
+    --popover-foreground: 204 208 207;
+    --primary: var(--accent-primary);
+    --primary-foreground: 6 20 27;
+    --secondary: var(--bg-elevated);
+    --secondary-foreground: 204 208 207;
+    --muted: var(--bg-elevated);
+    --muted-foreground: 120 140 152;
+    --accent: var(--bg-elevated);
+    --accent-foreground: 204 208 207;
+    --destructive: 239 68 68;
+    --destructive-foreground: 255 255 255;
+    --border: 74 92 106;           /* #4A5C6A */
+    --input: 74 92 106;
+    --ring: var(--accent-primary);
+    --radius: 0.75rem;
+  }
+
+  [data-theme="cashmere"] {
+    /* Cashmere Dusk (Rose Velvet & Warm Sand) */
+    --bg-base: 62 50 57;           /* #3E3239 */
+    --bg-surface: 107 85 96;       /* #6B5560 */
+    --bg-elevated: 130 105 118;    /* Custom elevated blend */
+    --accent-primary: 199 169 163; /* #C7A9A3 Cashmere Rose */
+    --accent-secondary: 232 210 196;/* #E8D2C4 Almond Silk */
+    --accent-velocity: 247 239 231;/* #F7EFE7 Alabaster Cream */
+    --accent-muxing: 245 158 11;   /* #F59E0B Warm Amber */
+
+    --background: var(--bg-base);
+    --foreground: 247 239 231;     /* #F7EFE7 */
+    --card: var(--bg-surface);
+    --card-foreground: 247 239 231;
+    --popover: var(--bg-elevated);
+    --popover-foreground: 247 239 231;
+    --primary: var(--accent-primary);
+    --primary-foreground: 62 50 57;
+    --secondary: var(--bg-elevated);
+    --secondary-foreground: 247 239 231;
+    --muted: var(--bg-elevated);
+    --muted-foreground: 185 160 170;
+    --accent: var(--bg-elevated);
+    --accent-foreground: 247 239 231;
+    --destructive: 239 68 68;
+    --destructive-foreground: 255 255 255;
+    --border: 158 129 137;         /* #9E8189 */
+    --input: 158 129 137;
+    --ring: var(--accent-primary);
+    --radius: 0.75rem;
+  }
+
+  [data-theme="boreal"] {
+    /* Boreal Jade (Deep Pine & Emerald Mist) */
+    --bg-base: 5 31 32;            /* #051F20 */
+    --bg-surface: 11 43 38;        /* #0B2B26 */
+    --bg-elevated: 22 56 50;       /* #163832 */
+    --accent-primary: 142 182 155; /* #8EB69B Sage Emerald */
+    --accent-secondary: 218 241 222;/* #DAF1DE Mint Whisper */
+    --accent-velocity: 82 231 176; /* #52E7B0 Neon Jade */
+    --accent-muxing: 250 204 21;   /* #FACC15 Golden Glow */
+
+    --background: var(--bg-base);
+    --foreground: 218 241 222;     /* #DAF1DE */
+    --card: var(--bg-surface);
+    --card-foreground: 218 241 222;
+    --popover: var(--bg-elevated);
+    --popover-foreground: 218 241 222;
+    --primary: var(--accent-primary);
+    --primary-foreground: 5 31 32;
+    --secondary: var(--bg-elevated);
+    --secondary-foreground: 218 241 222;
+    --muted: var(--bg-elevated);
+    --muted-foreground: 120 160 145;
+    --accent: var(--bg-elevated);
+    --accent-foreground: 218 241 222;
+    --destructive: 239 68 68;
+    --destructive-foreground: 255 255 255;
+    --border: 35 83 71;            /* #235347 */
+    --input: 35 83 71;
+    --ring: var(--accent-primary);
+    --radius: 0.75rem;
+  }
+
+  [data-theme="matrix"] {
+    /* Acid Matrix (Terminal Obsidian & Acid Cyber-Mint) */
+    --bg-base: 5 8 6;              /* #050806 */
+    --bg-surface: 11 17 13;        /* #0B110D */
+    --bg-elevated: 18 26 21;       /* #121A15 */
+    --accent-primary: 0 255 135;   /* #00FF87 Acid Matrix */
+    --accent-secondary: 163 230 53;/* #A3E635 Cyber Lime */
+    --accent-velocity: 6 182 212;  /* #06B6D4 Electric Cyan */
+    --accent-muxing: 250 204 21;   /* #FACC15 High-Voltage Amber */
+
+    --background: var(--bg-base);
+    --foreground: 236 253 245;
+    --card: var(--bg-surface);
+    --card-foreground: 236 253 245;
+    --popover: var(--bg-elevated);
+    --popover-foreground: 236 253 245;
+    --primary: var(--accent-primary);
+    --primary-foreground: 5 8 6;
+    --secondary: var(--bg-elevated);
+    --secondary-foreground: 209 250 229;
+    --muted: var(--bg-elevated);
+    --muted-foreground: 110 160 130;
+    --accent: var(--bg-elevated);
+    --accent-foreground: 236 253 245;
+    --destructive: 239 68 68;
+    --destructive-foreground: 255 255 255;
+    --border: 24 48 32;
+    --input: 24 48 32;
+    --ring: var(--accent-primary);
+    --radius: 0.75rem;
+  }
+
+  [data-theme="crimson"] {
+    /* Crimson Overdrive (Deep Wine & Solar Flare) */
+    --bg-base: 11 6 8;             /* #0B0608 */
+    --bg-surface: 20 11 15;        /* #140B0F */
+    --bg-elevated: 30 16 23;       /* #1E1017 */
+    --accent-primary: 244 63 94;   /* #F43F5E Crimson Overdrive */
+    --accent-secondary: 251 146 60;/* #FB923C Solar Orange */
+    --accent-velocity: 56 189 248; /* #38BDF8 Sky Nova */
+    --accent-muxing: 251 191 36;   /* #FBBF24 Amber */
+
+    --background: var(--bg-base);
+    --foreground: 255 241 242;
+    --card: var(--bg-surface);
+    --card-foreground: 255 241 242;
+    --popover: var(--bg-elevated);
+    --popover-foreground: 255 241 242;
+    --primary: var(--accent-primary);
+    --primary-foreground: 255 255 255;
+    --secondary: var(--bg-elevated);
+    --secondary-foreground: 254 205 211;
+    --muted: var(--bg-elevated);
+    --muted-foreground: 180 130 145;
+    --accent: var(--bg-elevated);
+    --accent-foreground: 255 241 242;
+    --destructive: 225 29 72;
+    --destructive-foreground: 255 255 255;
+    --border: 50 25 36;
+    --input: 50 25 36;
+    --ring: var(--accent-primary);
+    --radius: 0.75rem;
+  }
+
+  [data-theme="daylight"] {
+    /* Titanium Daylight (Frosted White & Crisp Contrast) */
+    --bg-base: 244 245 247;        /* #F4F5F7 */
+    --bg-surface: 255 255 255;     /* #FFFFFF */
+    --bg-elevated: 255 255 255;
+    --accent-primary: 255 94 26;   /* #FF5E1A */
+    --accent-secondary: 225 29 72; /* #E11D48 */
+    --accent-velocity: 5 150 105;  /* #059669 */
+    --accent-muxing: 217 119 6;    /* #D97706 */
+
+    --background: var(--bg-base);
+    --foreground: 9 9 11;
+    --card: var(--bg-surface);
+    --card-foreground: 9 9 11;
+    --popover: var(--bg-surface);
+    --popover-foreground: 9 9 11;
+    --primary: var(--accent-primary);
+    --primary-foreground: 255 255 255;
+    --secondary: 236 238 242;
+    --secondary-foreground: 39 39 42;
+    --muted: 244 244 245;
+    --muted-foreground: 113 113 122;
+    --accent: 236 238 242;
+    --accent-foreground: 9 9 11;
+    --destructive: 220 38 38;
+    --destructive-foreground: 255 255 255;
+    --border: 228 228 231;
+    --input: 228 228 231;
+    --ring: var(--accent-primary);
+    --radius: 0.75rem;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-foreground antialiased selection:bg-primary/25 selection:text-foreground;
+    background-color: rgb(var(--bg-base));
+    font-family: var(--font-inter, 'Inter'), system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  }
+
+  h1, h2, h3, h4, h5, h6, .font-heading {
+    font-family: var(--font-outfit, 'Outfit'), var(--font-inter, 'Inter'), system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  }
+  
+  /* Custom High-Precision Scrollbar */
+  ::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: rgb(var(--accent-primary) / 0.25);
+    border-radius: 9999px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: rgb(var(--accent-primary) / 0.5);
+  }
+}
+
+@layer utilities {
+  /* Dynamic Palette Gradients */
+  .gradient-primary {
+    background: linear-gradient(135deg, rgb(var(--accent-primary)), rgb(var(--accent-secondary)));
+  }
+  .gradient-velocity {
+    background: linear-gradient(135deg, rgb(var(--accent-primary)) 0%, rgb(var(--accent-secondary)) 50%, rgb(var(--accent-velocity)) 100%);
+  }
+  .gradient-card {
+    background: linear-gradient(135deg, rgb(var(--bg-surface)) 0%, rgb(var(--bg-elevated)) 100%);
+  }
+  .gradient-text {
+    background: linear-gradient(135deg, rgb(var(--accent-primary)), rgb(var(--accent-secondary)), rgb(var(--accent-velocity)));
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+
+  /* ========================================================
+     Cybernetic Glass HUD Architecture
+     ======================================================== */
+
+  /* Sticky HUD Header */
+  .header-hud {
+    background: rgb(var(--bg-base) / 0.85);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    border-bottom: 1px solid rgb(var(--border) / 0.6);
+    box-shadow: 0 10px 30px -10px rgb(0 0 0 / 0.5);
+  }
+
+  /* Nav Capsule Pill */
+  .nav-capsule-pill {
+    background: rgb(var(--bg-surface) / 0.7);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    border: 1px solid rgb(var(--border) / 0.6);
+    box-shadow: inset 0 1px 1px 0 rgb(255 255 255 / 0.05);
+  }
+
+  /* Active Tab Specular Optics */
+  .active-tab-specular {
+    box-shadow: 
+      inset 0 1px 1px 0 rgba(255, 255, 255, 0.4),
+      0 0 20px -2px rgba(var(--accent-primary) / 0.5);
+  }
+
+  /* Superellipse Curvature Tokens */
+  .squircle-card {
+    border-radius: 1.5rem;
+  }
+  .squircle-pill {
+    border-radius: 9999px;
+  }
+
+  /* Hardware Specular Glass Card (.omni-glass-card) */
+  .omni-glass-card {
+    background: linear-gradient(135deg, rgb(var(--bg-surface) / 0.8) 0%, rgb(var(--bg-elevated) / 0.65) 100%);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    border: 1px solid rgb(var(--border) / 0.6);
+    box-shadow: inset 0 1px 1px 0 rgb(255 255 255 / 0.05), 0 20px 40px -15px rgb(0 0 0 / 0.5);
+    transition: all 0.3s cubic-bezier(0.22, 1, 0.36, 1);
+  }
+  .omni-glass-card:hover {
+    border-color: rgb(var(--accent-primary) / 0.4);
+    box-shadow: inset 0 1px 1px 0 rgb(255 255 255 / 0.1), 0 25px 50px -15px rgb(0 0 0 / 0.6);
+  }
+
+  [data-theme="solaris"] .omni-glass-card {
+    background: linear-gradient(135deg, rgb(18 19 22 / 0.8) 0%, rgb(24 26 32 / 0.65) 100%);
+    border: 1px solid rgb(255 255 255 / 0.08);
+    border-top: 1.5px solid rgb(255 94 26 / 0.5);
+    box-shadow: inset 0 1px 1px 0 rgb(255 255 255 / 0.1), 0 20px 40px -15px rgb(0 0 0 / 0.6);
+  }
+  [data-theme="nordic"] .omni-glass-card {
+    background: linear-gradient(135deg, rgb(17 33 45 / 0.85) 0%, rgb(37 55 69 / 0.70) 100%);
+    border: 1px solid rgb(74 92 106 / 0.4);
+    border-top: 1.5px solid rgb(155 168 171 / 0.6);
+    box-shadow: inset 0 1px 1px 0 rgb(204 208 207 / 0.1), 0 20px 40px -15px rgb(0 0 0 / 0.6);
+  }
+  [data-theme="cashmere"] .omni-glass-card {
+    background: linear-gradient(135deg, rgb(107 85 96 / 0.85) 0%, rgb(130 105 118 / 0.70) 100%);
+    border: 1px solid rgb(158 129 137 / 0.4);
+    border-top: 1.5px solid rgb(199 169 163 / 0.6);
+    box-shadow: inset 0 1px 1px 0 rgb(247 239 231 / 0.1), 0 20px 40px -15px rgb(0 0 0 / 0.6);
+  }
+  [data-theme="boreal"] .omni-glass-card {
+    background: linear-gradient(135deg, rgb(11 43 38 / 0.85) 0%, rgb(22 56 50 / 0.70) 100%);
+    border: 1px solid rgb(35 83 71 / 0.4);
+    border-top: 1.5px solid rgb(142 182 155 / 0.6);
+    box-shadow: inset 0 1px 1px 0 rgb(218 241 222 / 0.1), 0 20px 40px -15px rgb(0 0 0 / 0.6);
+  }
+  [data-theme="matrix"] .omni-glass-card {
+    background: linear-gradient(135deg, rgb(11 17 13 / 0.85) 0%, rgb(18 26 21 / 0.7) 100%);
+    border: 1px solid rgb(0 255 135 / 0.15);
+    border-top: 1.5px solid rgb(0 255 135 / 0.6);
+    box-shadow: inset 0 1px 1px 0 rgb(0 255 135 / 0.15), 0 20px 40px -15px rgb(0 0 0 / 0.7);
+  }
+  [data-theme="crimson"] .omni-glass-card {
+    background: linear-gradient(135deg, rgb(20 11 15 / 0.85) 0%, rgb(30 16 23 / 0.7) 100%);
+    border: 1px solid rgb(244 63 94 / 0.15);
+    border-top: 1.5px solid rgb(244 63 94 / 0.6);
+    box-shadow: inset 0 1px 1px 0 rgb(244 63 94 / 0.15), 0 20px 40px -15px rgb(0 0 0 / 0.7);
+  }
+  [data-theme="daylight"] .omni-glass-card {
+    background: linear-gradient(135deg, rgba(255, 255, 255, 0.95) 0%, rgba(245, 247, 250, 0.9) 100%);
+    border: 1px solid rgb(228 228 231);
+    box-shadow: 0 10px 30px -10px rgba(0, 0, 0, 0.08);
+  }
+
+  /* SVG Noise Overlay */
+  .bg-noise {
+    background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)' opacity='0.035'/%3E%3C/svg%3E");
+  }
+
+  /* Ambient Aurora Mesh - Cybernetic accent scatter */
+  .bg-ambient-aurora {
+    background: 
+      radial-gradient(circle at 50% 0%, rgb(var(--accent-primary) / 0.22) 0%, transparent 60%),
+      radial-gradient(circle at 85% 20%, rgb(var(--accent-secondary) / 0.18) 0%, transparent 50%),
+      radial-gradient(circle at 15% 50%, rgb(var(--accent-velocity) / 0.12) 0%, transparent 55%),
+      radial-gradient(circle at 75% 80%, rgb(var(--accent-primary) / 0.15) 0%, transparent 50%);
+    opacity: 0.8;
+  }
+
+  /* Glow Effects */
+  .glow-primary {
+    box-shadow: 0 0 25px rgb(var(--accent-primary) / 0.35), 0 0 60px rgb(var(--accent-primary) / 0.12);
+  }
+  .glow-velocity {
+    box-shadow: 0 0 25px rgb(var(--accent-velocity) / 0.4), 0 0 50px rgb(var(--accent-velocity) / 0.15);
+  }
+  .glow-mux {
+    box-shadow: 0 0 25px rgb(var(--accent-muxing) / 0.5), 0 0 50px rgb(var(--accent-muxing) / 0.2);
+  }
+  .glow-input-focus {
+    box-shadow: 0 0 0 2px rgb(var(--bg-base)), 0 0 0 4px rgb(var(--accent-primary) / 0.4), 0 0 25px rgb(var(--accent-primary) / 0.2);
+  }
+
+  /* Animation Utilities */
+  .animate-spring-up {
+    animation: springUp 0.45s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+  }
+  .animate-shimmer-fast {
+    animation: shimmerFast 1.8s linear infinite;
+  }
+  .animate-mux-pulse {
+    animation: muxPulse 1.8s ease-in-out infinite;
+  }
+  .animate-shockwave {
+    animation: shockwave 0.8s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  }
+  .animate-float-slow {
+    animation: floatSlow 6s ease-in-out infinite;
+  }
+  .animate-progress-gradient {
+    animation: progressGradient 2s ease infinite;
+    background-size: 200% 100%;
+  }
+}
+
+/* Keyframes */
+@keyframes springUp {
+  0% {
+    opacity: 0;
+    transform: translateY(16px) scale(0.98);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes shimmerFast {
+  0% {
+    transform: translateX(-150%);
+  }
+  100% {
+    transform: translateX(150%);
+  }
+}
+
+@keyframes muxPulse {
+  0%, 100% {
+    opacity: 0.92;
+    transform: scale(1);
+    filter: drop-shadow(0 0 8px rgb(var(--accent-muxing) / 0.6));
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1.02);
+    filter: drop-shadow(0 0 22px rgb(var(--accent-muxing) / 0.95));
+  }
+}
+
+@keyframes shockwave {
+  0% {
+    box-shadow: 0 0 0 0 rgb(var(--accent-primary) / 0.85);
+  }
+  70% {
+    box-shadow: 0 0 0 16px rgb(var(--accent-primary) / 0);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgb(var(--accent-primary) / 0);
+  }
+}
+
+@keyframes floatSlow {
+  0%, 100% {
+    transform: translateY(0px) rotate(0deg);
+  }
+  50% {
+    transform: translateY(-8px) rotate(0.8deg);
+  }
+}
+
+@keyframes progressGradient {
+  0% {
+    background-position: 0% 50%;
+  }
+  50% {
+    background-position: 100% 50%;
+  }
+  100% {
+    background-position: 0% 50%;
+  }
+}
